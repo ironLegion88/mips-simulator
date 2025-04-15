@@ -47,6 +47,9 @@ def test_invalid_register(assembler):
     code = "addi $t10, $zero, 1" # $t10 is invalid
     result = assembler.assemble(code)
     assert len(result["errors"]) == 1
-    assert "Invalid register name: $t10" in result["errors"][0]["message"]
+    # ---- FIX ----
+    # Add single quotes around $t10 to match the actual error message
+    assert "Invalid register name: '$t10'" in result["errors"][0]["message"]
+    # ---- END FIX ----
 
 # Add many more tests for R/I/J types, pseudo-ops, labels, directives, errors...

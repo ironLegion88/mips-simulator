@@ -118,9 +118,11 @@ class MipsAssembler:
             return {"type": "directive", "label": label, "directive": directive, "args": args, "line_num": line_num, "original_text": original_line}
 
         # --- Assume Instruction ---
-        parts = re.split(r'\s+', line, 1)
+        # ---- FIX DeprecationWarning ----
+        parts = re.split(r'\s+', line, maxsplit=1) # Use keyword argument
         instruction = parts[0].lower()
         operands_str = parts[1] if len(parts) > 1 else ""
+        # ---- END FIX ----
 
         # Simple operand splitting by comma - handle memory format later if needed
         operands = [op.strip() for op in operands_str.split(',')]
@@ -305,29 +307,47 @@ class MipsAssembler:
                 if self.in_data_segment: continue # Skip instructions in data segment (error already logged)
 
                 instruction_name = parsed_line["instruction"]
+                original_text = parsed_line["original_text"]
+                line_num = parsed_line["line_num"]
                 expanded_base_instructions = []
 
-                if instruction_name in PSEUDO_HANDLERS:
-                    handler_func = PSEUDO_HANDLERS[instruction_name]
-                    try:
-                        # Pass necessary context like symbol table, current address
-                        expanded = handler_func(parsed_line, self.symbol_table, self.current_address)
-                        if expanded is None: # Expansion function indicated an error
-                             self._add_error(line_num, f"Error expanding pseudo-instruction '{instruction_name}'", original_text)
-                             expanded_base_instructions = [] # Ensure no instructions added on error
-                        else:
-                             expanded_base_instructions = expanded
-                    except Exception as e:
-                        logger.error(f"Exception during expansion of '{instruction_name}' on line {line_num}: {e}", exc_info=True)
-                        self._add_error(line_num, f"Internal error expanding pseudo-instruction '{instruction_name}': {e}", original_text)
+                # ---- START FIX (pseudo-instruction lookup) ----
+                # Check if it's a pseudo-instruction first
+                if instruction_name in PSEUDO_INSTRUCTIONS:
+                    handler_key = PSEUDO_INSTRUCTIONS[instruction_name]
+                    handler_func = PSEUDO_HANDLERS.get(handler_key)
+
+                    if handler_func:
+                        try:
+                            # Pass necessary context
+                            # Add original_text and line_num to parsed_line if not already there for handler context
+                            parsed_line_with_context = {**parsed_line, "original_text": original_text, "line_num": line_num}
+                            expanded = handler_func(parsed_line_with_context, self.symbol_table, self.current_address)
+
+                            if expanded is None: # Expansion function indicated an error
+                                self._add_error(line_num, f"Error expanding pseudo-instruction '{instruction_name}'", original_text)
+                                expanded_base_instructions = [] # Ensure no instructions added on error
+                            else:
+                                # Ensure the result is a list
+                                expanded_base_instructions = expanded if isinstance(expanded, list) else [expanded]
+                        except Exception as e:
+                            logger.error(f"Exception during expansion of '{instruction_name}' on line {line_num}: {e}", exc_info=True)
+                            self._add_error(line_num, f"Internal error expanding pseudo-instruction '{instruction_name}': {e}", original_text)
+                            expanded_base_instructions = []
+                    else:
+                        # Should not happen if consts are consistent, but good to check
+                        self._add_error(line_num, f"Internal Error: No handler found for pseudo-instruction key '{handler_key}'", original_text)
                         expanded_base_instructions = []
 
+                # Check if it's a known base instruction or syscall
                 elif instruction_name in R_TYPE_FUNCT or instruction_name in I_TYPE_OPCODE or instruction_name in J_TYPE_OPCODE or instruction_name == 'syscall':
-                    # It's a base instruction
+                    # It's a base instruction, keep it as is
                     expanded_base_instructions = [parsed_line]
+                # Otherwise, it's unknown
                 else:
                     self._add_error(line_num, f"Unknown instruction: '{instruction_name}'", original_text)
                     expanded_base_instructions = []
+                # ---- END FIX (pseudo-instruction lookup) ----
 
                 # Add expanded instructions to final list and assign addresses
                 for i, base_instr in enumerate(expanded_base_instructions):
