@@ -1,0 +1,125 @@
+/* Keep existing Next.js global styles if needed */
+
+/* Add these styles */
+body {
+  font-family: sans-serif;
+  padding: 0;
+  margin: 0;
+  background-color: #f0f2f5; /* Light background for the page */
+  color: #333;
+}
+
+main.container {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 20px;
+  max-width: 1200px; /* Limit max width */
+  margin: 20px auto; /* Center the main content */
+  background-color: #fff; /* White background for content area */
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.errorBox {
+  border: 1px solid #f5c6cb; /* Softer red border */
+  border-radius: 4px;
+  padding: 10px 15px;
+  background-color: #f8d7da; /* Light red background */
+  color: #721c24; /* Darker red text */
+  margin-bottom: 15px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.errorBox strong {
+   color: #721c24;
+   display: block;
+   margin-bottom: 5px;
+}
+
+.errorBox ul {
+  margin: 5px 0 0 20px;
+  padding: 0;
+  list-style: disc;
+}
+ .errorBox li {
+   margin-bottom: 3px;
+ }
+
+
+.sectionContainer {
+  display: flex;
+  flex-direction: row;
+  gap: 30px;
+  flex-wrap: wrap; /* Allow wrapping on smaller screens */
+}
+
+.section {
+  flex: 1 1 45%; /* Flex properties for side-by-side layout */
+  min-width: 350px; /* Minimum width before wrapping */
+  display: flex;
+  flex-direction: column;
+  gap: 15px; /* Space between elements within a section */
+}
+
+.section h2 {
+  margin-bottom: 5px; /* Reduce space below headings */
+  font-size: 1.3em;
+  color: #1a237e; /* Dark blue heading */
+}
+.section h3 {
+    margin-bottom: 5px;
+    font-size: 1.1em;
+     color: #555;
+}
+
+
+.editorWrapper {
+   border: 1px solid #ccc;
+   border-radius: 4px;
+   overflow: hidden; /* Ensures Monaco borders fit */
+   height: 40vh; /* Set height here */
+}
+
+.button {
+  margin-top: 0; /* Remove margin top if gap handles spacing */
+  padding: 8px 15px;
+  cursor: pointer;
+  background-color: #1976d2; /* Blue background */
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 1em;
+  transition: background-color 0.2s ease;
+  align-self: flex-start; /* Align button to the start of flex container */
+}
+
+.button:hover {
+    background-color: #1565c0; /* Darker blue on hover */
+}
+
+.textArea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: monospace;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 8px;
+  min-height: calc(40vh + 10px); /* Match editor height approx */
+}
+
+.outputPre {
+  background: #f5f5f5;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 10px;
+  min-height: 100px;
+  max-height: 200px; /* Limit height */
+  overflow-y: auto;
+  white-space: pre-wrap; /* Wrap long lines */
+  word-break: break-all; /* Break long words/hex codes */
+  font-family: monospace;
+  font-size: 0.9em;
+  color: #333;
+}
