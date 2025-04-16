@@ -65,10 +65,10 @@ R_TYPE_FORMATS = {
     "mfhi": ["rd"], "mflo": ["rd"],
     # rs, rt
     "mult": ["rs", "rt"], "multu": ["rs", "rt"], "div": ["rs", "rt"], "divu": ["rs", "rt"],
-    # jalr: rd, rs (optional rd, defaults to $ra)
-    "jalr": ["rd", "rs"], # Assembler needs to handle optional rd
-    # syscall: no operands, but R-type format
-    "syscall": [],
+    # jalr: rd, rs (or just rs, rd defaults to $ra=31)
+    "jalr": ["rd", "rs"],
+    "syscall": [], # R-type format, funct 0x0c
+    "break": [],   # R-type format, funct 0x0d
 }
 
 # I-Type: Specify order of rt, rs, imm/label
@@ -77,7 +77,7 @@ I_TYPE_FORMATS = {
     "addi": ["rt", "rs", "imm"], "addiu": ["rt", "rs", "imm"], "slti": ["rt", "rs", "imm"],
     "sltiu": ["rt", "rs", "imm"], "andi": ["rt", "rs", "imm"], "ori": ["rt", "rs", "imm"],
     "xori": ["rt", "rs", "imm"],
-    # rt, imm(rs) - parsed into rt, imm, rs
+    # rt, imm(rs) -> parsed as rt, imm, rs
     "lw": ["rt", "imm", "rs"], "sw": ["rt", "imm", "rs"], "lb": ["rt", "imm", "rs"],
     "lbu": ["rt", "imm", "rs"], "lh": ["rt", "imm", "rs"], "lhu": ["rt", "imm", "rs"],
     "sb": ["rt", "imm", "rs"], "sh": ["rt", "imm", "rs"],
@@ -85,9 +85,10 @@ I_TYPE_FORMATS = {
     "lui": ["rt", "imm"],
     # rs, rt, label
     "beq": ["rs", "rt", "label"], "bne": ["rs", "rt", "label"],
-    # rs, label (rt field is specific opcode extension)
+    # rs, label (rt field used for opcode variant)
     "blez": ["rs", "label"], "bgtz": ["rs", "label"], "bltz": ["rs", "label"], "bgez": ["rs", "label"],
-    # TODO: Add floating point I-types if needed (lwc1, swc1)
+    "bltzal": ["rs", "label"], "bgezal": ["rs", "label"],
+    # TODO: Add LWC1, SWC1 etc. if supporting floating point
 }
 
 # J-Type: Specify order of target
@@ -104,9 +105,9 @@ R_TYPE_FUNCT = {
     "sll": 0x00, "srl": 0x02, "sra": 0x03,
     "sllv": 0x04, "srlv": 0x06, "srav": 0x07,
     "jr": 0x08, "jalr": 0x09,
+    "syscall": 0x0c, "break": 0x0d, # Added syscall, break
     "mfhi": 0x10, "mthi": 0x11, "mflo": 0x12, "mtlo": 0x13,
     "mult": 0x18, "multu": 0x19, "div": 0x1a, "divu": 0x1b,
-    # syscall has funct 0x0c, handle separately in assembler/disassembler
 }
 
 I_TYPE_OPCODE = {
@@ -117,9 +118,11 @@ I_TYPE_OPCODE = {
     "beq": 0x4, "bne": 0x5,
     "blez": 0x6, # rt = 0
     "bgtz": 0x7, # rt = 0
+    # REGIMM (opcode 0x1) instructions have rt field specifying variant
     "bltz": 0x1, # rt = 0
     "bgez": 0x1, # rt = 1
-    # TODO: Add floating point, traps if needed
+    "bltzal": 0x1, # rt = 16 (0x10)
+    "bgezal": 0x1, # rt = 17 (0x11)
 }
 
 J_TYPE_OPCODE = {
@@ -128,21 +131,22 @@ J_TYPE_OPCODE = {
 
 # --- Reverse Maps for Disassembler ---
 OPCODE_MAP_REV = {
-    0x0: "R-type", # Special case
-    0x1: "REGIMM", # Special case for bltz/bgez
-    **{v: k for k, v in I_TYPE_OPCODE.items() if k not in ["bltz", "bgez"]}, # Avoid simple reverse mapping for REGIMM
+    0x0: "R-type",
+    0x1: "REGIMM",
+    **{v: k for k, v in I_TYPE_OPCODE.items() if k not in ["bltz", "bgez", "bltzal", "bgezal"]}, # Use opcode 1 map
     **{v: k for k, v in J_TYPE_OPCODE.items()},
 }
-OPCODE_MAP_REV[0x6] = 'blez' # Explicitly map blez/bgtz
+OPCODE_MAP_REV[0x6] = 'blez'
 OPCODE_MAP_REV[0x7] = 'bgtz'
 
 FUNCT_MAP_REV = {v: k for k, v in R_TYPE_FUNCT.items()}
-FUNCT_MAP_REV[0x0c] = 'syscall' # Add syscall
+# Note: syscall/break already added via R_TYPE_FUNCT
 
 REGIMM_RT_MAP_REV = { # For Opcode 0x1
     0x0: 'bltz',
     0x1: 'bgez',
-    # Add others like bltzal, bgezal if implementing
+    0x10: 'bltzal', # Added
+    0x11: 'bgezal', # Added
 }
 
 # --- Pseudo Instructions and Handlers ---
@@ -270,10 +274,11 @@ def _expand_bge(parsed_line, symbol_table, current_address):
     return _expand_branch_pseudo("bge", "slt", True, parsed_line, symbol_table, current_address)
 
 
-PSEUDO_INSTRUCTIONS = { # Just maps name to handler key
+PSEUDO_INSTRUCTIONS = {
     "move": "_expand_move", "clear": "_expand_clear", "nop": "_expand_nop",
     "li": "_expand_li", "la": "_expand_la",
     "blt": "_expand_blt", "bgt": "_expand_bgt", "ble": "_expand_ble", "bge": "_expand_bge",
+    # Add more if desired (e.g., abs, neg, not, beqz, bnez...)
 }
 
 # Map handler keys to actual functions (defined above or within MipsAssembler)
@@ -284,7 +289,8 @@ PSEUDO_HANDLERS = {
     "_expand_blt": _expand_blt, "_expand_bgt": _expand_bgt, "_expand_ble": _expand_ble, "_expand_bge": _expand_bge,
 }
 
-# Add Directives Set
+# --- Directives Set ---
 DIRECTIVES = {
-    ".data", ".text", ".globl", ".extern", ".word", ".byte", ".half", ".space", ".asciiz", ".align"
+    ".data", ".text", ".globl", ".extern", # Added .globl, .extern
+    ".word", ".byte", ".half", ".space", ".asciiz", ".align"
 }
