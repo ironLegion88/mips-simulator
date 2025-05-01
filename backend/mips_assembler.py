@@ -408,12 +408,21 @@ class MipsAssembler:
 
                  # Append data based on directive type
                  if directive == ".word":
-                     for val_str in args:
-                         try:
-                             val = int(val_str, 0)
-                             # Store as 4 bytes, handle endianness (e.g., little)
-                             self.data_segment.extend(val.to_bytes(4, byteorder='little', signed=True)) # Use signed=True? Depends on MIPS spec/target
-                         except ValueError: self._add_error(line_num, f"Invalid value for .word: '{val_str}'", original_text)
+                    for val_str in args:
+                        try:
+                            val = int(val_str, 0)
+                            # --- FIX ---
+                            # Check if the value fits in 32 bits unsigned
+                            if not (0 <= val <= 0xFFFFFFFF):
+                                # If negative, check signed 32-bit range
+                                if not (-(1 << 31) <= val < (1 << 31)):
+                                    raise OverflowError("Value out of 32-bit range")
+                            # Convert to bytes - treat as unsigned for storage range check,
+                            # but the byte pattern will be interpreted correctly later.
+                            self.data_segment.extend(val.to_bytes(4, byteorder='little', signed=False))
+                            # --- END FIX ---
+                        except ValueError: self._add_error(line_num, f"Invalid value for .word: '{val_str}'", original_text)
+                        except OverflowError: self._add_error(line_num, f"Value '{val_str}' out of 32-bit range for .word", original_text)
                  elif directive == ".byte":
                       for val_str in args:
                          try:

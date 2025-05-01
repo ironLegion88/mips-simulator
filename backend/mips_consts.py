@@ -291,6 +291,6 @@ PSEUDO_HANDLERS = {
 
 # --- Directives Set ---
 DIRECTIVES = {
-    ".data", ".text", ".globl", ".extern", # Added .globl, .extern
-    ".word", ".byte", ".half", ".space", ".asciiz", ".align"
+    ".data", ".text", ".globl", ".extern",
+    ".word", ".byte", ".half", ".space", ".asciiz", ".ascii", ".align" # Added .ascii
 }

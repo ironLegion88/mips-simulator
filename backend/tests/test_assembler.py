@@ -56,8 +56,9 @@ def test_assemble_sw(assembler):
     result = assembler.assemble(code)
     assert not result["errors"], f"Expected no errors, got: {result['errors']}"
     assert len(result["machine_code"]) == 1
-    # sw: opcode=0x2b, rs=28($gp), rt=4($a0), imm=16 (0x10) -> 0xae040010
-    assert result["machine_code"][0]["hex"] == "0xae040010"
+    # sw: opcode=0x2b, rs=28($gp), rt=4($a0), imm=16 (0x10) -> 0xaf840010
+    # --- FIX: Update expected value ---
+    assert result["machine_code"][0]["hex"] == "0xaf840010"
 
 def test_assemble_beq(assembler):
     code = """
@@ -182,37 +183,38 @@ def test_assemble_nop(assembler):
 
 def test_assemble_branch_pseudo(assembler):
     code = """
-    start: blt $t0, $t1, target
-           bgt $t0, $t1, target
-           ble $t0, $t1, target
-           bge $t0, $t1, target
-    target: nop
+    start: blt $t0, $t1, target # 0x00, 0x04
+           bgt $t0, $t1, target # 0x08, 0x0c
+           ble $t0, $t1, target # 0x10, 0x14
+           bge $t0, $t1, target # 0x18, 0x1c
+    target: nop                 # 0x20
     """
     result = assembler.assemble(code)
     assert not result["errors"], f"Expected no errors, got: {result['errors']}"
-    assert len(result["machine_code"]) == (2 * 4) + 1 # 4 pseudo-branches expand to 2 instr each, plus nop
+    assert len(result["machine_code"]) == (2 * 4) + 1 # 9 instructions total
 
+    # --- FIX: Update expected branch codes based on correct offsets ---
     # blt $t0, $t1, target -> slt $at, $t0, $t1; bne $at, $zero, target
-    # pc=0, target=0x10. offset = (0x10 - (4+4))/4 = 8/4 = 2
-    assert result["machine_code"][0]["hex"] == "0x0109082a" # slt $at, $t0, $t1
-    assert result["machine_code"][1]["hex"] == "0x14200002" # bne $at, $zero, offset=2
+    # Inst Addr=0x04, PC+4=0x08, Target=0x20. Offset = (0x20 - 0x08) / 4 = 0x18 / 4 = 6
+    assert result["machine_code"][0]["hex"] == "0x0109082a" # slt $at, $t0, $t1 (@ 0x00)
+    assert result["machine_code"][1]["hex"] == "0x14200006" # bne $at, $zero, offset=6 (@ 0x04)
 
     # bgt $t0, $t1, target -> slt $at, $t1, $t0; bne $at, $zero, target
-    # pc=8, target=0x10. offset = (0x10 - (8+4))/4 = 4/4 = 1
-    assert result["machine_code"][2]["hex"] == "0x0128082a" # slt $at, $t1, $t0
-    assert result["machine_code"][3]["hex"] == "0x14200001" # bne $at, $zero, offset=1
+    # Inst Addr=0x0c, PC+4=0x10, Target=0x20. Offset = (0x20 - 0x10) / 4 = 0x10 / 4 = 4
+    assert result["machine_code"][2]["hex"] == "0x0128082a" # slt $at, $t1, $t0 (@ 0x08)
+    assert result["machine_code"][3]["hex"] == "0x14200004" # bne $at, $zero, offset=4 (@ 0x0c)
 
     # ble $t0, $t1, target -> slt $at, $t1, $t0; beq $at, $zero, target
-    # pc=0xc, target=0x10. offset = (0x10 - (c+4))/4 = 0/4 = 0
-    assert result["machine_code"][4]["hex"] == "0x0128082a" # slt $at, $t1, $t0
-    assert result["machine_code"][5]["hex"] == "0x10200000" # beq $at, $zero, offset=0
+    # Inst Addr=0x14, PC+4=0x18, Target=0x20. Offset = (0x20 - 0x18) / 4 = 0x8 / 4 = 2
+    assert result["machine_code"][4]["hex"] == "0x0128082a" # slt $at, $t1, $t0 (@ 0x10)
+    assert result["machine_code"][5]["hex"] == "0x10200002" # beq $at, $zero, offset=2 (@ 0x14)
 
     # bge $t0, $t1, target -> slt $at, $t0, $t1; beq $at, $zero, target
-    # pc=0x10, target=0x10. offset = (0x10 - (10+4))/4 = -4/4 = -1 (0xffff)
-    assert result["machine_code"][6]["hex"] == "0x0109082a" # slt $at, $t0, $t1
-    assert result["machine_code"][7]["hex"] == "0x1020ffff" # beq $at, $zero, offset=-1
+    # Inst Addr=0x1c, PC+4=0x20, Target=0x20. Offset = (0x20 - 0x20) / 4 = 0 / 4 = 0
+    assert result["machine_code"][6]["hex"] == "0x0109082a" # slt $at, $t0, $t1 (@ 0x18)
+    assert result["machine_code"][7]["hex"] == "0x10200000" # beq $at, $zero, offset=0 (@ 0x1c)
 
-    # nop
+    # nop (@ 0x20)
     assert result["machine_code"][8]["hex"] == "0x00000000"
 
 
@@ -279,19 +281,16 @@ def test_immediate_out_of_range(assembler):
 
 
 def test_branch_too_far(assembler):
-    # Create a branch that exceeds the 16-bit signed offset range
-    # Need approx 2^15 instructions = 32768 instructions apart
-    # This is hard to test directly without huge code, focus on offset calculation logic if needed
-    # For now, test a case that should work fine
-    code = "beq $zero, $zero, target\n" + ".space 0x10000\n" + "target: nop" # ~64k space
-    result = assembler.assemble(code)
-    # This specific setup might actually work depending on address wrapping etc.
-    # A better test might involve calculating the offset directly.
-    # Let's test a known *failing* case if offset calculation is correct
-    code_fail = "beq $zero, $zero, target\n" + ".space 0x40000\n" + "target: nop" # 256k space -> offset > 2^15 words
+    # ... (code setup remains the same) ...
+    code_fail = "beq $zero, $zero, target\n" + ".space 0x40000\n" + "target: nop" # 256k space
     result_fail = assembler.assemble(code_fail)
     assert len(result_fail["errors"]) >= 1
-    assert any("Branch target 'target' (offset 65535) too far" in e["message"] for e in result_fail["errors"])
+    # --- FIX ---
+    # Expect offset 65536 in the error message
+    expected_msg_part = "Branch target 'target' (offset 65536) too far"
+    assert any(expected_msg_part in e["message"] for e in result_fail["errors"]), \
+           f"Expected error containing '{expected_msg_part}', got errors: {result_fail['errors']}"
+    # --- END FIX ---
 
 
 def test_duplicate_label(assembler):
