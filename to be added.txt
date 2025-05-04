@@ -1,3 +1,3 @@
-1. Procedural call
-2. Step by step execution
+1. Procedural call and stack maintenance
+2. Step by step execution (one instruction at a time, sequentially)
 3. I/O Console (all different possible data formats)
