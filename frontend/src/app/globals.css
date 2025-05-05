@@ -1,125 +1,263 @@
-/* Keep existing Next.js global styles if needed */
+/* frontend/src/app/globals.css */
 
-/* Add these styles */
+/* Keep existing Next.js global styles if needed (e.g., from create-next-app template) */
+/* You might want to remove default padding/margins from body/html if they interfere */
+/* html, body { padding: 0; margin: 0; } */
+
+/* General page styling */
 body {
-  font-family: sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
   padding: 0;
   margin: 0;
-  background-color: #f0f2f5; /* Light background for the page */
-  color: #333;
+  background-color: #f0f2f5; /* Light grey background for the page */
+  color: #333; /* Default text color */
+  line-height: 1.6;
 }
 
+/* Main content container */
 main.container {
   display: flex;
   flex-direction: column;
   padding: 20px;
-  gap: 20px;
-  max-width: 1200px; /* Limit max width */
+  gap: 25px; /* Slightly increased gap */
+  max-width: 1300px; /* Slightly wider */
   margin: 20px auto; /* Center the main content */
-  background-color: #fff; /* White background for content area */
+  background-color: #ffffff; /* White background for content area */
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1); /* Subtle shadow */
 }
 
-.errorBox {
-  border: 1px solid #f5c6cb; /* Softer red border */
+/* Section layout (for columns) */
+.sectionContainer {
+  display: flex;
+  flex-direction: row; /* Arrange children side-by-side */
+  gap: 30px;           /* Space between columns */
+  flex-wrap: wrap;     /* Allow columns to wrap on smaller screens */
+}
+
+/* Individual column/section styling */
+.section {
+  flex: 1 1 45%;       /* Allow sections to grow/shrink, aim for ~45% width */
+  min-width: 350px;    /* Minimum width before wrapping */
+  display: flex;
+  flex-direction: column;
+  gap: 15px;           /* Space between elements *within* a section */
+}
+
+/* Headings */
+h1 {
+    text-align: center;
+    color: #1a237e; /* Dark blue */
+    margin-bottom: 10px;
+}
+h2 {
+  margin-top: 0; /* Remove default top margin */
+  margin-bottom: 10px; /* Space below H2 */
+  font-size: 1.4em;
+  color: #1a237e; /* Dark blue heading */
+  border-bottom: 1px solid #eee; /* Subtle underline */
+  padding-bottom: 5px;
+}
+h3 {
+    margin-top: 0;
+    margin-bottom: 8px; /* Space below H3 */
+    font-size: 1.15em;
+    color: #333; /* Dark grey */
+}
+
+/* Editor styling */
+.editorWrapper {
+   border: 1px solid #ccc;
+   border-radius: 4px;
+   overflow: hidden; /* Ensures Monaco borders fit */
+   height: 45vh;     /* Slightly taller editor */
+   /* The Editor component itself will fill this wrapper */
+}
+
+/* Button styling */
+.button {
+  padding: 9px 18px; /* Slightly larger padding */
+  cursor: pointer;
+  background-color: #1976d2; /* Blue background */
+  color: white;
+  border: none;
   border-radius: 4px;
-  padding: 10px 15px;
-  background-color: #f8d7da; /* Light red background */
-  color: #721c24; /* Darker red text */
-  margin-bottom: 15px;
-  max-height: 150px;
-  overflow-y: auto;
+  font-size: 0.95em; /* Slightly smaller font */
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+  align-self: flex-start; /* Align button to the start if in a flex container */
+}
+.button:hover {
+    background-color: #1565c0; /* Darker blue on hover */
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.button:disabled {
+    background-color: #aabbcc; /* Grey out disabled buttons */
+    cursor: not-allowed;
+    box-shadow: none;
 }
 
+/* Grouping for buttons */
+.simControls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap; /* Allow buttons to wrap */
+  margin-bottom: 15px;
+}
+
+/* Text Area styling */
+.textArea {
+  width: 100%;
+  box-sizing: border-box; /* Include padding/border in width */
+  font-family: 'Courier New', Courier, monospace; /* Monospace font */
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 10px;
+  min-height: calc(45vh + 12px); /* Match editor height approx + padding */
+  resize: vertical; /* Allow vertical resizing */
+  line-height: 1.4;
+}
+
+/* Preformatted text block styling (for code output, console) */
+.outputPre {
+  background: #f8f9fa; /* Lighter background */
+  border: 1px solid #e9ecef; /* Lighter border */
+  border-radius: 4px;
+  padding: 12px;
+  min-height: 100px;   /* Minimum height */
+  overflow-y: auto;    /* Add scrollbar if content overflows */
+  white-space: pre-wrap; /* Wrap long lines but preserve whitespace */
+  word-break: break-all; /* Break long words/hex codes */
+  font-family: 'Consolas', 'Monaco', 'Courier New', Courier, monospace; /* Monospace font */
+  font-size: 0.9em;
+  color: #212529; /* Darker text for better contrast */
+  line-height: 1.5;
+}
+
+/* Styling for tables within outputPre (Registers, Memory) */
+.outputPre table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 1em; /* Inherit font size from parent */
+}
+.outputPre th, .outputPre td {
+    text-align: left;
+    padding: 4px 8px; /* More padding */
+    border-bottom: 1px solid #dee2e6; /* Slightly darker lines */
+    font-family: inherit; /* Inherit monospace font */
+    vertical-align: top; /* Align text to top */
+}
+.outputPre th {
+    background-color: #e9ecef; /* Lighter grey header */
+    font-weight: 600; /* Slightly bolder */
+}
+.outputPre tr:last-child td {
+    border-bottom: none; /* No line after last table row */
+}
+
+/* Specific wrapper classes for height/scrolling */
+.registerTableWrapper {
+    max-height: 55vh; /* Adjust as needed */
+    overflow-y: auto;
+    font-size: 0.9em; /* Smaller font for dense tables */
+    border: 1px solid #e9ecef; /* Add border around the table scroll area */
+    border-radius: 4px;
+}
+.memoryTableWrapper {
+    max-height: 38vh; /* Adjust as needed */
+    overflow-y: auto;
+    font-size: 0.9em;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+}
+
+/* I/O Console specific styling */
+.ioConsole {
+    height: 12vh; /* Slightly taller */
+    background: #212529; /* Dark background */
+    color: #f8f9fa; /* Light text */
+    margin-top: 10px; /* Space above console */
+}
+
+/* Machine code output format selector */
+.formatSelector {
+  margin-bottom: 10px;
+  margin-top: 5px;
+}
+.formatSelector label {
+  margin-right: 15px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+.formatSelector input[type="radio"] {
+  margin-right: 4px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+/* Error display box styling */
+.errorBox {
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  padding: 12px 18px; /* More padding */
+  background-color: #f8d7da;
+  color: #721c24;
+  margin-bottom: 15px;
+  max-height: 180px; /* Allow more space for errors */
+  overflow-y: auto;
+  font-size: 0.95em;
+}
 .errorBox strong {
    color: #721c24;
    display: block;
-   margin-bottom: 5px;
+   margin-bottom: 6px;
+   font-weight: 600;
 }
-
 .errorBox ul {
   margin: 5px 0 0 20px;
   padding: 0;
   list-style: disc;
 }
  .errorBox li {
-   margin-bottom: 3px;
+   margin-bottom: 4px;
  }
-
-
-.sectionContainer {
-  display: flex;
-  flex-direction: row;
-  gap: 30px;
-  flex-wrap: wrap; /* Allow wrapping on smaller screens */
+ /* Styling for the code snippet within an error message */
+.errorTextSpan {
+  color: #8c1c25; /* Darker red for snippet */
+  margin-left: 8px;
+  font-style: italic;
+  font-family: 'Consolas', 'Monaco', 'Courier New', Courier, monospace;
 }
 
-.section {
-  flex: 1 1 45%; /* Flex properties for side-by-side layout */
-  min-width: 350px; /* Minimum width before wrapping */
-  display: flex;
-  flex-direction: column;
-  gap: 15px; /* Space between elements within a section */
-}
-
-.section h2 {
-  margin-bottom: 5px; /* Reduce space below headings */
-  font-size: 1.3em;
-  color: #1a237e; /* Dark blue heading */
-}
-.section h3 {
-    margin-bottom: 5px;
-    font-size: 1.1em;
-     color: #555;
-}
-
-
-.editorWrapper {
-   border: 1px solid #ccc;
-   border-radius: 4px;
-   overflow: hidden; /* Ensures Monaco borders fit */
-   height: 40vh; /* Set height here */
-}
-
-.button {
-  margin-top: 0; /* Remove margin top if gap handles spacing */
-  padding: 8px 15px;
-  cursor: pointer;
-  background-color: #1976d2; /* Blue background */
-  color: white;
+/* Horizontal rule styling */
+.horizontalRule {
+  margin: 25px 0; /* More vertical space */
   border: none;
-  border-radius: 4px;
-  font-size: 1em;
-  transition: background-color 0.2s ease;
-  align-self: flex-start; /* Align button to the start of flex container */
+  border-top: 1px solid #dee2e6; /* Lighter separator */
 }
 
-.button:hover {
-    background-color: #1565c0; /* Darker blue on hover */
+/* Simulator status display styling */
+.simStatus {
+   margin-top: 10px;
+   font-size: 0.95em;
+}
+.simStatus strong {
+   font-weight: 600; /* Bolder status text */
+}
+.simStatus .error {
+   color: #dc3545; /* Bootstrap danger red */
+   font-weight: bold;
 }
 
-.textArea {
-  width: 100%;
-  box-sizing: border-box;
-  font-family: monospace;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  padding: 8px;
-  min-height: calc(40vh + 10px); /* Match editor height approx */
+/* Style for the currently executing line in Monaco */
+.current-execution-line {
+  background-color: rgba(255, 255, 0, 0.2) !important; /* Yellowish highlight */
+  /* You might need !important to override default Monaco styles */
 }
 
-.outputPre {
-  background: #f5f5f5;
-  border: 1px solid #eee;
-  border-radius: 4px;
-  padding: 10px;
-  min-height: 100px;
-  max-height: 200px; /* Limit height */
-  overflow-y: auto;
-  white-space: pre-wrap; /* Wrap long lines */
-  word-break: break-all; /* Break long words/hex codes */
-  font-family: monospace;
-  font-size: 0.9em;
-  color: #333;
+/* Optional: Style for gutter marker */
+.current-execution-gutter {
+  /* background: url('path/to/your/arrow/icon.png') center center no-repeat; */
+  /* Or use a background color */
+  background-color: yellow;
+  width: 5px !important; /* Adjust width as needed */
 }

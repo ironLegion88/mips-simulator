@@ -1,6 +1,7 @@
 # backend/mips_assembler.py
 import re
 import logging
+import codecs # Import codecs module for unescaping
 # Use absolute imports relative to backend package
 from backend.mips_consts import (
     REGISTER_MAP, REGISTER_MAP_REV, R_TYPE_FUNCT, I_TYPE_OPCODE, J_TYPE_OPCODE,
@@ -23,6 +24,7 @@ class MipsAssembler:
         self.machine_code = [] # Stores generated integer machine code words
         self.errors = []
         self.in_data_segment = False
+        self.address_to_line_map = {} # Map address -> original source line number
 
     def _add_error(self, line_num, message, instruction_text=""):
         """Adds an error, preventing duplicates for the same line/message."""
@@ -108,15 +110,28 @@ class MipsAssembler:
             directive = parts[0].lower()
             args_str = parts[1] if len(parts) > 1 else ""
             args = []
-            # Special handling for string arguments
+            # Special handling for string arguments with escape sequence processing
             if directive in ['.asciiz', '.ascii']:
+                 # Match string within double quotes
                  match_str = re.match(r'"(.*)"', args_str) # Basic quoted string
                  if match_str:
-                     # Handle basic escape sequences if needed, e.g., \\, \"
-                     # For simplicity now, just take the content
-                     args = [match_str.group(1)]
+                     raw_string = match_str.group(1)
+                     # --- FIX: Unescape C-style escapes ---
+                     try:
+                         # Use 'unicode_escape' for common escapes like \n, \t, \\, \"
+                         # Note: This might interpret octal/hex escapes too if present.
+                         # For strict ASCII + \n/\t, manual replacement might be safer,
+                         # but unicode_escape is convenient.
+                         unescaped_string = codecs.decode(raw_string, 'unicode_escape')
+                         args = [unescaped_string]
+                     except Exception as e:
+                          # Handle potential decoding errors if string format is bad
+                          self._add_error(line_num, f"Error decoding string literal for {directive}: {e}", original_line)
+                          args = [raw_string] # Fallback to raw string on error
+                     # --- END FIX ---
                  else:
-                     self._add_error(line_num, f"Invalid string format for {directive}: {args_str}", original_line)
+                     # String didn't match the expected "..." format
+                     self._add_error(line_num, f"Invalid string format for {directive}: Expected \"...\", got {args_str}", original_line)
             elif args_str: # For other directives like .word, .byte, .space, .globl
                 args = [a.strip() for a in args_str.split(',')]
                 args = [a for a in args if a] # Remove empty strings
@@ -311,6 +326,7 @@ class MipsAssembler:
         self.data_segment = bytearray() # Reset data segment
         self.current_address = self.base_text_address # Reset address for accurate calculation
         self.in_data_segment = False
+        self.address_to_line_map = {} # Reset map for this assembly run
 
         logger.debug("--- Starting Second Pass ---")
 
@@ -384,7 +400,9 @@ class MipsAssembler:
                     base_instr['original_text'] = original_text # Keep track for errors
                     if i > 0: base_instr['label'] = None # Label only applies to first expanded instruction
 
+                    base_instr_addr = self.current_address # Address of this base instruction
                     final_instructions.append(base_instr)
+                    self.address_to_line_map[base_instr_addr] = line_num # Map address to ORIGINAL source line
                     self.current_address += 4 # Each base instruction is 4 bytes
                     logger.debug(f"Pass 2a: Added base instruction '{base_instr['instruction']}' at 0x{base_instr['address']:08x}, next addr 0x{self.current_address:08x} (from line {line_num})")
 
@@ -775,4 +793,16 @@ class MipsAssembler:
         else:
              logger.info("Assembly successful.")
 
-        return {"machine_code": formatted_output, "errors": self.errors, "data_segment": hex_data}
+        # --- FIX: Include address map in return ---
+        return {
+            "machine_code": formatted_output,
+            "errors": self.errors,
+            "data_segment": hex_data,
+            "address_map": self.address_to_line_map # Add the map here
+        }
+        # --- END FIX ---
+
+    # except Exception as e:
+    #     # ... (exception handling) ...
+    #     # Return empty map on error
+    #     return {"machine_code": [], "errors": self.errors, "data_segment": "", "address_map": {}}
