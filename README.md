@@ -77,14 +77,24 @@ This simulator implements a significant subset of the MIPS I ISA and provides se
     *   **Export Options (Planned):**
         *   *Future:* Allow downloading the current assembly code (`.s`) or the assembled machine code (`.hex` or `.bin`).
 
+**4. Advanced Architecture & Microarchitecture (Sprints 1-5):**
+    *   **Cycle-Accurate 5-Stage Pipeline:** Simulates `IF`, `ID`, `EX`, `MEM`, and `WB` stages with Data Forwarding and Hazard Detection (Load-Use stalls).
+    *   **Branch Prediction:** 1-Bit Branch History Table (BHT) with pipeline flush logic on misprediction.
+    *   **Configurable Cache Simulator:** N-way set associative, Write-Through/Write-Back, LRU/FIFO/Random replacement.
+    *   **Coprocessors 0 & 1:** Hardware exception routing (CP0) and full IEEE-754 floating-point arithmetic (CP1).
+    *   **Time-Travel Debugging:** Step *backwards* through execution using a ring-buffer state history.
+    *   **Virtual File System (VFS):** Sandboxed environment intercepting syscalls 13-16 securely in-memory.
+    *   **Memory-Mapped I/O (MMIO):** Interactive Terminal mapped to `0xFFFF0000`/`0xFFFF0004` triggering hardware interrupts.
+    *   **Hardware & Data Visualization:** React Flow datapath canvas with live signal animations and Recharts metrics dashboard for CPI, cache hits, and hazard breakdowns.
+
 ---
 
 ## Technical Stack
 
 | Component         | Tools                                                              | Purpose                                                         |
 | :---------------- | :----------------------------------------------------------------- | :-------------------------------------------------------------- |
-| **Frontend**      | React.js (Next.js) + TypeScript, Monaco Editor, CSS Modules/Global CSS | Build a responsive UI, code editing, dynamic state display.      |
-| **Backend**       | Python + Flask                                                     | Handle API requests, run assembler, disassembler, simulator.     |
+| **Frontend**      | React.js (Next.js), TypeScript, Monaco, Tailwind, Zustand, React Flow, Recharts | UI, state routing, code editing, datapath visualizer, metrics. |
+| **Backend**       | Python + Flask                                                     | API, assembler, cycle-accurate simulator, VFS, cache simulator. |
 | **Assembler**     | Custom Python Implementation                                       | Two-pass assembly, pseudo-instruction expansion, directives.   |
 | **Disassembler**  | Custom Python Implementation                                       | Machine code to assembly conversion.                            |
 | **Simulator**     | Custom Python Implementation                                       | MIPS state machine, instruction execution, memory management.   |
@@ -317,15 +327,14 @@ mips-simulator/
     *   Implement code export functionality (.s, .bin/.hex).
     *   Enhance runtime error detection (infinite loops).
     *   (Optional) Dark/Light mode toggle.
-*   **Phase 3 (Week 8/9):**
-    *   **Graphical Hardware Visualization:** Implement dynamic visualization of ALU, Register File, Memory access.
+*   **Phase 3 (Completed in Sprints 1-5):**
+    *   ✅ **Graphical Hardware Visualization:** React Flow 5-stage pipeline datapath.
+    *   ✅ **Floating Point:** FPU registers and IEEE-754 instructions (Co-processor 1).
+    *   ✅ **UI/UX Polish:** 4-Mode Shell, Metrics Profiler, Monaco Hover tooltips, and Time-Travel debugging.
     *   **Advanced Stack Visualization:** More detailed graphical representation of the stack frame.
-    *   **UI/UX Polish:** Improve aesthetics, responsiveness, tooltips, help sections, Memory View navigation.
     *   **Comprehensive Frontend Testing:** Write Jest/RTL tests.
     *   **End-to-End Testing:** Implement Cypress/Selenium tests.
-    *   **Floating Point:** Add support for FPU registers and instructions (Co-processor 1).
     *   **Breakpoints/Watchpoints:** Allow users to set breakpoints in the code or watch specific memory locations/registers.
-    *   **Documentation:** Finalize README, add usage details, comments.
     *   **Deployment:** Deploy to a cloud hosting platform.
 
 ---

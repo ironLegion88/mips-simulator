@@ -116,14 +116,45 @@ A story is complete only when:
 ## 8. Sprint 5: Profiler, MMIO, and Polish
 
 ### 8.1 Epic: Performance Profiler Mode [Req: PM-001 to PM-003]
-* **Task S5-E1-T1: Chart.js Metrics Dashboard**
+* **[x] Task S5-E1-T1: Chart.js Metrics Dashboard**
   * *File:* `frontend/src/components/Profiler.tsx`
   * *Action:* Render pie charts for Hazard breakdowns (Data vs Control), Line charts for Cache Hit Rates over time, and a KPI block for overall CPI.
 
 ### 8.2 Epic: Virtual File System & MMIO [Req: EX-005, EX-006]
-* **Task S5-E2-T1: Keyboard & Terminal MMIO**
+* **[x] Task S5-E2-T1: Keyboard & Terminal MMIO**
   * *File:* `backend/mips_mmu.py`, `frontend/src/components/Terminal.tsx`
   * *Action:* Map frontend terminal keystrokes to WebSocket events, writing to `0xFFFF0000`. Trigger hardware interrupt in Coprocessor 0.
-* **Task S5-E2-T2: Virtual File System Sandbox**
+* **[x] Task S5-E2-T2: Virtual File System Sandbox**
   * *File:* `backend/vfs.py`
   * *Action:* Intercept syscalls 13-16. Route read/write requests to a Python dictionary representing virtual file descriptors.
+
+---
+
+## 9. Sprint 6: WebSockets, Debugging, and Visualizations (Upcoming)
+
+### 9.1 Epic: Real-Time Networking [Req: NW-001]
+* **Task S6-E1-T1: WebSocket Backend Stream**
+  * *File:* `backend/app.py`
+  * *Action:* Integrate `Flask-SocketIO`. Wrap the existing `yield_state()` generator in an asynchronous event emitter that streams pipeline and simulator state payloads continuously.
+* **Task S6-E1-T2: Zustand WebSocket Client**
+  * *File:* `frontend/src/store/useUIStore.ts`
+  * *Action:* Integrate `socket.io-client`. Establish connection on mount and listen for `state_update` events, patching the global UI state in real-time without HTTP polling.
+
+### 9.2 Epic: Advanced Debugging [Req: DB-001, DB-002]
+* **Task S6-E2-T1: Breakpoints & Watchpoints Backend**
+  * *File:* `backend/mips_simulator.py`
+  * *Action:* Add `self.breakpoints: set[int]` and `self.watchpoints: set[int]`. Modify the fetch/execute cycle to pause if `pc in breakpoints` or if a memory/register write targets a watchpoint.
+* **Task S6-E2-T2: Editor Gutter Integration**
+  * *File:* `frontend/src/components/Editor.tsx`
+  * *Action:* Hook into Monaco Editor's glyph margin API. Allow users to click the margin to place red breakpoint dots. Map lines to PC addresses and sync to the backend API.
+
+### 9.3 Epic: Advanced Visualizations & Content [Req: UI-002, ED-001]
+* **Task S6-E3-T1: Program Counter (PC) Visualizer**
+  * *File:* `frontend/src/components/PCVisualizer.tsx` (New)
+  * *Action:* Create a dedicated mini-timeline or graphical widget (perhaps pinned near the Execution Controls). It should display the current PC, the next predicted PC (from the Branch Predictor), and visually highlight jumps and branch targets in real-time.
+* **Task S6-E3-T2: Stack Frame Visualizer**
+  * *File:* `frontend/src/components/StackView.tsx` (New)
+  * *Action:* Create a dedicated visualization for the stack. Visually render the bounds between `$sp` and `$fp`, highlighting newly pushed/popped words during execution.
+* **Task S6-E3-T3: Examples Library & Code Export**
+  * *File:* `frontend/src/components/ExamplesMenu.tsx`, `frontend/src/utils/export.ts`
+  * *Action:* Hardcode 3-5 classic MIPS algorithms (Factorial, Bubble Sort). Implement a utility to generate Blob URLs for downloading compiled `.hex` and `.bin` machine code payloads.
