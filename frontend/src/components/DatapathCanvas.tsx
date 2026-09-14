@@ -24,26 +24,44 @@ const initialNodes: Node[] = [
     style: { backgroundColor: '#1E293B', color: 'white', border: '1px solid #334155', width: 120, height: 100 }
   },
   {
+    id: 'mux_regdst',
+    position: { x: 380, y: 350 },
+    data: { label: 'MUX (RegDst)' },
+    style: { backgroundColor: '#1E293B', color: 'white', border: '1px solid #334155', borderRadius: '20px', width: 60, height: 40, fontSize: '10px' }
+  },
+  {
     id: 'reg_file',
-    position: { x: 450, y: 250 },
+    position: { x: 480, y: 250 },
     data: { label: 'Registers' },
     style: { backgroundColor: '#1E293B', color: 'white', border: '1px solid #334155', width: 100, height: 120 }
   },
   {
+    id: 'mux_alusrc',
+    position: { x: 620, y: 320 },
+    data: { label: 'MUX (ALUSrc)' },
+    style: { backgroundColor: '#1E293B', color: 'white', border: '1px solid #334155', borderRadius: '20px', width: 60, height: 40, fontSize: '10px' }
+  },
+  {
     id: 'alu',
-    position: { x: 700, y: 200 },
+    position: { x: 720, y: 200 },
     data: { label: 'ALU' },
     style: { backgroundColor: '#1E293B', color: 'white', border: '1px solid #334155', clipPath: 'polygon(0% 0%, 100% 25%, 100% 75%, 0% 100%, 0% 60%, 20% 50%, 0% 40%)', width: 100, height: 140 }
   },
   {
     id: 'data_mem',
-    position: { x: 950, y: 250 },
+    position: { x: 880, y: 250 },
     data: { label: 'Data Memory' },
     style: { backgroundColor: '#1E293B', color: 'white', border: '1px solid #334155', width: 120, height: 100 }
   },
   {
+    id: 'mux_memtoreg',
+    position: { x: 1050, y: 250 },
+    data: { label: 'MUX (MemtoReg)' },
+    style: { backgroundColor: '#1E293B', color: 'white', border: '1px solid #334155', borderRadius: '20px', width: 60, height: 40, fontSize: '10px' }
+  },
+  {
     id: 'control_unit',
-    position: { x: 450, y: 50 },
+    position: { x: 480, y: 50 },
     data: { label: 'Control Unit' },
     style: { backgroundColor: '#1E293B', color: 'white', border: '1px solid #334155', borderRadius: '50%' }
   }
@@ -61,11 +79,17 @@ const defaultEdgeOptions = {
 
 const baseEdges: Edge[] = [
   { id: 'e-pc-imem', source: 'pc', target: 'instr_mem', ...defaultEdgeOptions },
-  { id: 'e-imem-reg', source: 'instr_mem', target: 'reg_file', ...defaultEdgeOptions },
   { id: 'e-imem-ctrl', source: 'instr_mem', target: 'control_unit', ...defaultEdgeOptions },
+  { id: 'e-imem-reg', source: 'instr_mem', target: 'reg_file', ...defaultEdgeOptions },
+  { id: 'e-imem-mux_regdst', source: 'instr_mem', target: 'mux_regdst', ...defaultEdgeOptions },
+  { id: 'e-mux_regdst-reg', source: 'mux_regdst', target: 'reg_file', ...defaultEdgeOptions },
   { id: 'e-reg-alu', source: 'reg_file', target: 'alu', ...defaultEdgeOptions },
+  { id: 'e-reg-mux_alusrc', source: 'reg_file', target: 'mux_alusrc', ...defaultEdgeOptions },
+  { id: 'e-mux_alusrc-alu', source: 'mux_alusrc', target: 'alu', ...defaultEdgeOptions },
   { id: 'e-alu-dmem', source: 'alu', target: 'data_mem', ...defaultEdgeOptions },
-  { id: 'e-dmem-wb', source: 'data_mem', target: 'reg_file', ...defaultEdgeOptions },
+  { id: 'e-alu-mux_memtoreg', source: 'alu', target: 'mux_memtoreg', ...defaultEdgeOptions },
+  { id: 'e-dmem-mux_memtoreg', source: 'data_mem', target: 'mux_memtoreg', ...defaultEdgeOptions },
+  { id: 'e-mux_memtoreg-reg', source: 'mux_memtoreg', target: 'reg_file', ...defaultEdgeOptions },
 ];
 
 export const DatapathCanvas: React.FC<{ pipelineState: PipelineState | null }> = ({ pipelineState }) => {
