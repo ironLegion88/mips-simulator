@@ -76,18 +76,18 @@ A story is complete only when:
 ## 6. Sprint 3: The IDE, Time-Travel Debugger, and Global UI
 
 ### 6.1 Epic: The 4-Mode Shell & Editor [Req: UI-1, ID-001]
-* **Task S3-E1-T1: Global Header & Zustand Router**
+* **[x] Task S3-E1-T1: Global Header & Zustand Router**
   * *File:* `frontend/src/components/Shell.tsx`
   * *Action:* Implement Tailwind-styled top navigation. Use Zustand to switch rendering between Simulator, Datapath, Memory, and Profiler modes.
-* **Task S3-E1-T2: Monaco Integration & Tooltips**
+* **[x] Task S3-E1-T2: Monaco Integration & Tooltips**
   * *File:* `frontend/src/components/Editor.tsx`
   * *Action:* Register the `mips` language. Feed the Disassembler's bit-field metadata into Monaco's `hoverProvider` to show instruction breakdowns on hover.
 
 ### 6.2 Epic: Time-Travel & Debugging [Req: PG-003, ID-003]
-* **Task S3-E2-T1: State History Buffer**
+* **[x] Task S3-E2-T1: State History Buffer**
   * *File:* `backend/mips_simulator.py`
   * *Action:* Create a fixed-size `collections.deque`. On each cycle, append a delta of changed registers and memory addresses.
-* **Task S3-E2-T2: Stepping Controls**
+* **[x] Task S3-E2-T2: Stepping Controls**
   * *File:* `frontend/src/components/ExecutionControls.tsx`
   * *Action:* Implement `Play`, `Pause`, `Step Over`, `Step Into`, and `Step Back`. Bind WebSockets to trigger history popping on `Step Back`.
 
