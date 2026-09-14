@@ -181,21 +181,23 @@ class MipsAssembler:
             "original_text": original_line
         }
 
-    def first_pass(self, assembly_code):
+    def first_pass(self, lines_data):
         """ Pass 1: Build symbol table, parse lines, handle basic directives for address calculation. """
         self.symbol_table = {}
         self.parsed_lines = []
         self.errors = []
         self.current_address = self.base_text_address # Start in .text
         self.in_data_segment = False
-        lines = assembly_code.splitlines()
         current_segment_base = self.base_text_address
 
         logger.debug("--- Starting First Pass ---")
-        for i, line in enumerate(lines):
-            line_num = i + 1
+        for line_obj in lines_data:
+            line_num = line_obj['line_num']
+            line = line_obj['text']
             parsed = self._parse_line(line, line_num)
             if not parsed: continue
+            
+            parsed['filename'] = line_obj['filename']
 
             # Assign current address *before* potentially modifying it for the current item
             parsed["address"] = self.current_address
@@ -751,8 +753,8 @@ class MipsAssembler:
         return (opcode << 26) | encoded_addr_part
 
 
-    def assemble(self, assembly_code):
-        """ Main method to assemble MIPS code. """
+    def assemble(self, payload):
+        """ Main method to assemble MIPS code. Payload can be a string or list of dicts. """
         logger.info("Starting assembly process...")
         # Clear previous state
         self.symbol_table = {}
@@ -762,10 +764,23 @@ class MipsAssembler:
         self.machine_code = [] # Stores integer words
         self.errors = []
         self.in_data_segment = False
+        
+        from backend.mips_preprocessor import MipsPreprocessor
+        preprocessor = MipsPreprocessor()
+        
+        if isinstance(payload, str):
+            files = [{'filename': 'main.s', 'content': payload}]
+        else:
+            files = payload
+            
+        processed_lines = preprocessor.preprocess(files)
+        if preprocessor.errors:
+            for err in preprocessor.errors:
+                self.errors.append({"line": 0, "message": err["message"], "text": ""})
 
         # Run Passes
         try:
-            self.first_pass(assembly_code)
+            self.first_pass(processed_lines)
             # Don't stop completely on first pass errors, Pass 2 might find more useful context
             # if self.errors: return {"machine_code": [], "errors": self.errors, "data_segment": ""}
 
