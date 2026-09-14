@@ -39,15 +39,15 @@ A story is complete only when:
 ## 4. Sprint 1: Advanced Execution Architecture & Assembler
 
 ### 4.1 Epic: The Macro Assembler [Req: AD-001 to AD-004]
-* **Task S1-E1-T1: Multi-file & Linker Support**
+* **[x] Task S1-E1-T1: Multi-file & Linker Support**
   * *File:* `backend/mips_assembler.py`
   * *Action:* Refactor `assemble` to accept a list of file payloads. Implement a global symbol table resolving `.globl` and `.extern` across files.
-* **Task S1-E1-T2: Macro Engine Implementation**
+* **[x] Task S1-E1-T2: Macro Engine Implementation**
   * *File:* `backend/mips_preprocessor.py` (New)
   * *Action:* Implement a pre-pass that parses `%macro name(args)` and `%end_macro`, performing text substitution before Pass 1.
 
 ### 4.2 Epic: The Instruction-Accurate Core [Req: EX-001, EX-002]
-* **Task S1-E2-T1: Refactoring the Execution Loop**
+* **[x] Task S1-E2-T1: Refactoring the Execution Loop**
   * *File:* `backend/mips_simulator.py`
   * *Action:* Decouple fetch, decode, and execute logic into modular methods to prepare for pipelining. Implement an execution generator `yield_state()` for WebSocket streaming.
 
