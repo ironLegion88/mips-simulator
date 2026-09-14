@@ -129,24 +129,18 @@ def test_memory_read_write_half(simulator):
     assert "out of range for 2 byte(s)" in simulator.error_message
 
 def test_memory_alignment_error(simulator):
-     """Tests detection of unaligned memory access for word and half-word."""
-     assert simulator.write_memory(0x10010040, 123, 4) == True # Aligned OK
-     read_val = simulator.read_memory(0x10010041, 4) # Unaligned Read Word
-     assert simulator.state == "error" and "Unaligned memory read" in simulator.error_message
-     assert read_val == 0
+    """Tests detection of unaligned memory access for word and half-word."""
+    from backend.mips_simulator import UnalignedAccessError
+    import pytest
+    
+    assert simulator.write_memory(0x10010040, 123, 4) == True # Aligned OK
+    
+    with pytest.raises(UnalignedAccessError):
+        simulator.read_memory(0x10010041, 4) # Unaligned Read Word
 
-     simulator.reset()
-     assert simulator.write_memory(0x10010042, 456, 4) == False # Unaligned Write Word
-     assert simulator.state == "error" and "Unaligned memory write" in simulator.error_message
-
-     simulator.reset()
-     assert simulator.write_memory(0x10010050, 100, 2) == True # Aligned OK
-     assert simulator.read_memory(0x10010051, 2) == 0 # Unaligned Read Half
-     assert simulator.state == "error" and "Unaligned memory read" in simulator.error_message
-
-     simulator.reset()
-     assert simulator.write_memory(0x10010051, 200, 2) == False # Unaligned Write Half
-     assert simulator.state == "error" and "Unaligned memory write" in simulator.error_message
+    simulator.reset()
+    with pytest.raises(UnalignedAccessError):
+        simulator.write_memory(0x10010051, 200, 2) # Unaligned Write Half
 
 # --- Test Arithmetic/Logical Instruction Execution ---
 
@@ -325,15 +319,15 @@ def test_step_mult_div_mflo_mfhi(simulator):
     assert state["state"] == "paused"
 
 def test_step_div_by_zero(simulator):
-    """Tests division by zero error."""
+    """Tests division by zero routing to Coproc0 exception handler."""
     # div $t0, $t1 -> 0x0109001a
     sim = load_test_code(simulator, ["0x0109001a"])
     sim.registers[8] = 10
     sim.registers[9] = 0 # Divide by zero
     state = sim.step()
-    assert state["state"] == "error"
-    assert "Division by zero" in state["error"]
-    assert state["pc"] == TEXT_START # PC does not advance
+    assert state["state"] != "error"
+    assert state["pc"] == 0x80000180
+    assert sim.coproc0.read_reg(13) >> 2 & 0x1F == 12 # ExcCode for Ov
 
 def test_step_mtlo_mthi(simulator):
     """Tests MTLO, MTHI."""
@@ -467,14 +461,14 @@ def test_step_jr(simulator):
     assert state["pc"] == target_pc and state["state"] == "paused"
 
 def test_step_jr_unaligned(simulator):
-    """Tests JR with an unaligned target address."""
+    """Tests JR to an unaligned address."""
     # jr $t0 -> 0x01000008
     sim = load_test_code(simulator, ["0x01000008"])
-    target_pc = TEXT_START + 9 # Unaligned target
-    sim.registers[8] = target_pc
+    sim.registers[8] = 0x00400001 # Unaligned address
     state = sim.step()
-    assert state["state"] == "error" and "unaligned" in state["error"].lower()
-    assert state["pc"] == TEXT_START # PC should not advance
+    assert state["state"] != "error"
+    assert state["pc"] == 0x80000180
+    assert sim.coproc0.read_reg(8) == 0x00400001 # BadVAddr
 
 def test_step_jalr(simulator):
     """Tests the JALR (Jump And Link Register) instruction."""

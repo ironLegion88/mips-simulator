@@ -3,6 +3,17 @@ import logging
 import struct # For packing/unpacking bytes to/from byte representations
 import time # For potential run loop timing/yielding
 from collections import defaultdict # For efficient sparse memory representation
+from backend.mips_coproc0 import MipsCoproc0
+
+class UnalignedAccessError(Exception):
+    def __init__(self, address, is_read=True):
+        self.address = address
+        self.is_read = is_read
+        super().__init__(f"Unaligned access at 0x{address:08x}")
+
+class HardwareException(Exception):
+    """Raised internally when an exception is routed to Coproc0."""
+    pass
 
 # Set up logger for this module
 logger = logging.getLogger(__name__)
@@ -25,6 +36,7 @@ class MipsSimulator:
 
     def reset(self):
         """Resets the simulator to its initial state before loading a program."""
+        self.coproc0 = MipsCoproc0()
         # General Purpose Registers (GPRs) initialized to 0
         self.registers = [0] * 32
         # Program Counter: starts at the typical text segment base
@@ -81,14 +93,12 @@ class MipsSimulator:
 
     # --- Memory Access Methods ---
 
-    def _check_alignment(self, address, num_bytes):
+    def _check_alignment(self, address, num_bytes, is_read=True):
         """Checks if memory address is aligned for the given access size (2 or 4 bytes)."""
         if num_bytes == 2 and address % 2 != 0:
-            logger.warning(f"Alignment Error: Half-word access at unaligned address 0x{address:08x}")
-            return False
+            raise UnalignedAccessError(address, is_read)
         if num_bytes == 4 and address % 4 != 0:
-            logger.warning(f"Alignment Error: Word access at unaligned address 0x{address:08x}")
-            return False
+            raise UnalignedAccessError(address, is_read)
         return True
 
     def read_memory(self, address, num_bytes):
@@ -96,11 +106,7 @@ class MipsSimulator:
         Reads 1, 2, or 4 bytes from memory as a SIGNED value.
         Handles basic alignment checks. Returns integer value or 0 on error.
         """
-        if not self._check_alignment(address, num_bytes):
-            self.state = "error"
-            self.error_message = f"Unaligned memory read at 0x{address:08x} for {num_bytes} bytes"
-            logger.error(self.error_message)
-            return 0
+        self._check_alignment(address, num_bytes, is_read=True)
 
         try:
             # Read the required bytes from the memory dictionary
@@ -126,11 +132,7 @@ class MipsSimulator:
          Reads 1, 2, or 4 bytes from memory as an UNSIGNED value.
          Handles basic alignment checks. Returns integer value or 0 on error.
          """
-         if not self._check_alignment(address, num_bytes):
-             self.state = "error"
-             self.error_message = f"Unaligned memory read at 0x{address:08x} for {num_bytes} bytes"
-             logger.error(self.error_message)
-             return 0
+         self._check_alignment(address, num_bytes, is_read=True)
 
          try:
              value_bytes = bytearray(self.memory[address + i] for i in range(num_bytes))
@@ -155,11 +157,7 @@ class MipsSimulator:
         The provided 'value' is treated according to the size specifier (b, h, i).
         Returns True on success, False on error.
         """
-        if not self._check_alignment(address, num_bytes):
-            self.state = "error"
-            self.error_message = f"Unaligned memory write at 0x{address:08x} for {num_bytes} bytes"
-            logger.error(self.error_message)
-            return False
+        self._check_alignment(address, num_bytes, is_read=False)
 
         try:
             # Pack the integer value into bytes based on size (using little-endian format '<')
@@ -256,18 +254,22 @@ class MipsSimulator:
             logger.warning(f"Cannot step, simulator state is '{self.state}'")
             return self.get_state()
 
-        instruction = self.fetch()
-        if instruction is None:
-            return self.get_state()
-            
-        decoded = self.decode(instruction)
-        self.execute(decoded)
+        try:
+            instruction = self.fetch()
+            if instruction is None:
+                return self.get_state()
+                
+            decoded = self.decode(instruction)
+            self.execute(decoded)
+        except HardwareException:
+            pass # Exception handled, PC is at 0x80000180
         
         return self.get_state()
         
     def fetch(self):
         if self.pc % 4 != 0:
-             self._runtime_error(f"PC unaligned: 0x{self.pc:08x}")
+             # Address Error (Fetch) -> AdEL (exc_code 4)
+             self._trigger_exception(exc_code=4, bad_vaddr=self.pc, message=f"PC unaligned: 0x{self.pc:08x}")
              return None
 
         instr_index = self.instruction_map.get(self.pc)
@@ -350,11 +352,13 @@ class MipsSimulator:
                 elif funct == 0x07: self._set_register(rd, to_signed_32(reg_rt_val) >> (reg_rs_val & 0x1F))
                 elif funct == 0x08: # jr
                      target_addr = reg_rs_val
-                     if target_addr % 4 != 0: self._runtime_error(f"Jump Register target address unaligned: 0x{target_addr:08x}")
+                     if target_addr % 4 != 0: 
+                          self._trigger_exception(exc_code=4, bad_vaddr=target_addr, message=f"Jump target address unaligned: 0x{target_addr:08x}")
                      else: pc_next = target_addr; branch_taken = True
                 elif funct == 0x09: # jalr
                      target_addr = reg_rs_val
-                     if target_addr % 4 != 0: self._runtime_error(f"Jump and Link Register target address unaligned: 0x{target_addr:08x}")
+                     if target_addr % 4 != 0: 
+                          self._trigger_exception(exc_code=4, bad_vaddr=target_addr, message=f"Jump target address unaligned: 0x{target_addr:08x}")
                      else:
                           return_addr = self.pc + 8; dest_reg = rd if rd != 0 else 31
                           self._set_register(dest_reg, return_addr)
@@ -371,13 +375,13 @@ class MipsSimulator:
                      self.lo = result & 0xFFFFFFFF; self.hi = (result >> 32) & 0xFFFFFFFF
                 elif funct == 0x1a: # div
                      rs_signed = to_signed_32(reg_rs_val); rt_signed = to_signed_32(reg_rt_val)
-                     if rt_signed == 0: self._runtime_error("Division by zero")
+                     if rt_signed == 0: raise ZeroDivisionError("Division by zero")
                      else:
                           quotient = int(rs_signed / rt_signed); remainder = rs_signed % rt_signed
                           self.lo = quotient & 0xFFFFFFFF; self.hi = remainder & 0xFFFFFFFF
                 elif funct == 0x1b: # divu
                      rs_unsigned = reg_rs_val & 0xFFFFFFFF; rt_unsigned = reg_rt_val & 0xFFFFFFFF
-                     if rt_unsigned == 0: self._runtime_error("Division by zero")
+                     if rt_unsigned == 0: raise ZeroDivisionError("Division by zero")
                      else:
                           self.lo = (rs_unsigned // rt_unsigned) & 0xFFFFFFFF
                           self.hi = (rs_unsigned % rt_unsigned) & 0xFFFFFFFF
@@ -458,6 +462,16 @@ class MipsSimulator:
             if branch_taken: logger.debug(f"Branch/Jump taken. New PC=0x{self.pc:08x}")
             elif self.state == "paused" or self.state == "running": logger.debug(f"Instruction executed. New PC=0x{self.pc:08x}")
             
+        except HardwareException:
+             # Exception already handled and routed to 0x80000180
+             pass
+        except ZeroDivisionError as e:
+             self.pc = prev_pc # Ensure PC is correct for EPC
+             self._trigger_exception(exc_code=12, message=str(e)) # 12 = Overflow / generic arithmetic exception for simplicity
+        except UnalignedAccessError as e:
+             self.pc = prev_pc
+             exc_code = 4 if e.is_read else 5 # AdEL or AdES
+             self._trigger_exception(exc_code=exc_code, bad_vaddr=e.address, message=str(e))
         except Exception as e:
              self._runtime_error(f"Runtime exception: {e}")
              logger.error(f"Runtime exception at PC 0x{prev_pc:08x}", exc_info=True)
@@ -471,6 +485,13 @@ class MipsSimulator:
              logger.debug(f"Set Register ${reg_index} = 0x{unsigned_value:08x} ({to_signed_32(unsigned_value)})")
         elif reg_index == 0: pass # Ignore writes to $zero
         else: logger.error(f"Attempted to write to invalid register index {reg_index}")
+
+    def _trigger_exception(self, exc_code, bad_vaddr=0, message=""):
+        """Routes an exception to Coprocessor 0 and jumps to exception vector."""
+        logger.error(f"Hardware Exception (Code {exc_code}) at PC 0x{self.pc:08x}: {message}")
+        self.coproc0.trigger_exception(exc_code, self.pc, bad_vaddr)
+        self.pc = 0x80000180
+        raise HardwareException()
 
     def _runtime_error(self, message, is_break=False):
         """Sets the simulator state to error."""
