@@ -250,14 +250,47 @@ h3 {
 
 /* Style for the currently executing line in Monaco */
 .current-execution-line {
-  background-color: rgba(255, 255, 0, 0.2) !important; /* Yellowish highlight */
-  /* You might need !important to override default Monaco styles */
+    background-color: rgba(100, 100, 0, 0.3) !important; /* Dim yellow highlight */
+    border-left: 3px solid yellow !important; /* Yellow left border */
 }
 
-/* Optional: Style for gutter marker */
-.current-execution-gutter {
-  /* background: url('path/to/your/arrow/icon.png') center center no-repeat; */
-  /* Or use a background color */
-  background-color: yellow;
-  width: 5px !important; /* Adjust width as needed */
+/* Style for highlighting changed registers/memory */
+/* Uses CSS animation for a quick fade */
+@keyframes highlight-fade {
+  from { background-color: rgba(0, 255, 0, 0.4); } /* Start green */
+  to { background-color: transparent; } /* Fade to transparent */
+}
+.highlight-change td { /* Apply highlight to table cells of changed row */
+  /* animation: highlight-fade 1.5s ease-out; */ /* Animation can be jarring, use simple background */
+   background-color: rgba(0, 255, 0, 0.15); /* Light green static highlight */
+}
+
+/* Styling for the syscall input area */
+.input-area {
+    margin-top: 10px;
+    padding: 8px;
+    border: 1px dashed #ccc;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background-color: #f0f0f0;
+}
+.input-area label {
+    font-weight: bold;
+    font-size: 0.9em;
+    margin-right: 5px; /* Space after label */
+}
+.input-area .input-field {
+    flex-grow: 1; /* Allow input field to take available space */
+    padding: 5px 8px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', Courier, monospace;
+}
+.input-area .input-submit {
+    /* Use existing button styles, maybe slightly smaller */
+    padding: 5px 10px;
+    font-size: 0.9em;
+    flex-shrink: 0; /* Prevent button from shrinking */
 }
