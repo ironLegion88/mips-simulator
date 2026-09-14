@@ -245,238 +245,223 @@ class MipsSimulator:
 
     # --- Simulation Control ---
 
+
     def step(self):
         """
         Executes a single MIPS instruction located at the current PC.
         Updates simulator state (PC, registers, memory, status).
         Returns the updated state dictionary.
         """
-        # Check if simulator is in a valid state for stepping
         if self.state not in ["loaded", "paused", "running", "input_wait"]:
             logger.warning(f"Cannot step, simulator state is '{self.state}'")
             return self.get_state()
 
-        # Check if pause was requested during a run
-        # Note: step() itself doesn't handle pause_requested directly anymore, run() does.
-
-        # --- Fetch ---
+        instruction = self.fetch()
+        if instruction is None:
+            return self.get_state()
+            
+        decoded = self.decode(instruction)
+        self.execute(decoded)
+        
+        return self.get_state()
+        
+    def fetch(self):
         if self.pc % 4 != 0:
-             self.state = "error"
-             self.error_message = f"PC unaligned: 0x{self.pc:08x}"
-             logger.error(self.error_message)
-             return self.get_state()
+             self._runtime_error(f"PC unaligned: 0x{self.pc:08x}")
+             return None
 
         instr_index = self.instruction_map.get(self.pc)
-        program_end_addr = self.text_base + len(self.instructions) * 4
 
         if instr_index is None: # PC outside loaded instructions
-             if self.pc >= DATA_START: # Executing data/stack?
-                  self.state = "error"
-                  self.error_message = f"PC attempted to execute from data/stack/invalid region: 0x{self.pc:08x}"
-                  logger.error(self.error_message)
+             if self.pc >= 0x10010000: # DATA_START check
+                  self._runtime_error(f"PC attempted to execute from data/stack/invalid region: 0x{self.pc:08x}")
              else: # Ran off end of loaded code
                   self.state = "finished"
                   self.exit_code = 0
                   self.termination_reason = "Execution ran off the end of the program."
                   logger.info(self.termination_reason)
-             return self.get_state()
+             return None
 
-        instruction = self.instructions[instr_index]
-
-        # --- Decode ---
-        opcode = (instruction >> 26) & 0x3F
-        rs = (instruction >> 21) & 0x1F
-        rt = (instruction >> 16) & 0x1F
-        rd = (instruction >> 11) & 0x1F
-        shamt = (instruction >> 6) & 0x1F
-        funct = instruction & 0x3F
-        imm = instruction & 0xFFFF
-        imm_signed = self._sign_extend_imm(imm, 16)
-        addr = instruction & 0x03FFFFFF
-
-        # --- Execute ---
-        pc_next = self.pc + 4 # Default next PC
-        self.output_buffer = "" # Clear output buffer for THIS step only
-        self.error_message = None # Clear previous non-fatal error messages
+        return self.instructions[instr_index]
+        
+    def decode(self, instruction):
+        return {
+            'opcode': (instruction >> 26) & 0x3F,
+            'rs': (instruction >> 21) & 0x1F,
+            'rt': (instruction >> 16) & 0x1F,
+            'rd': (instruction >> 11) & 0x1F,
+            'shamt': (instruction >> 6) & 0x1F,
+            'funct': instruction & 0x3F,
+            'imm': instruction & 0xFFFF,
+            'imm_signed': self._sign_extend_imm(instruction & 0xFFFF, 16),
+            'addr': instruction & 0x03FFFFFF,
+            'instruction': instruction
+        }
+        
+    def execute(self, decoded):
+        opcode = decoded['opcode']
+        rs = decoded['rs']
+        rt = decoded['rt']
+        rd = decoded['rd']
+        shamt = decoded['shamt']
+        funct = decoded['funct']
+        imm = decoded['imm']
+        imm_signed = decoded['imm_signed']
+        addr = decoded['addr']
+        instruction = decoded['instruction']
+        
+        pc_next = self.pc + 4
+        self.output_buffer = ""
+        self.error_message = None
         branch_taken = False
-        self.steps_executed += 1 # Increment step count
-
-        # Store previous state before execution for potential error recovery/logging
+        self.steps_executed += 1
+        
         prev_pc = self.pc
-
         logger.debug(f"Step {self.steps_executed}: PC=0x{self.pc:08x}, Instr=0x{instruction:08x}, Opcode=0x{opcode:02x}")
-
-        # Use temporary variables for register reads for clarity
+        
         reg_rs_val = self.registers[rs]
         reg_rt_val = self.registers[rt]
-
+        
         try:
             # --- R-Type Instructions (opcode == 0) ---
             if opcode == 0:
-                if funct == 0x20: # add $rd, $rs, $rt (Add Signed, trap on overflow)
+                if funct == 0x20: # add
                     result = reg_rs_val + reg_rt_val
                     if (reg_rs_val ^ result) & (reg_rt_val ^ result) & 0x80000000: self._runtime_error("Arithmetic overflow")
                     else: self._set_register(rd, to_signed_32(result))
-                elif funct == 0x21: # addu $rd, $rs, $rt (Add Unsigned)
-                    self._set_register(rd, (reg_rs_val + reg_rt_val))
-                elif funct == 0x22: # sub $rd, $rs, $rt (Subtract Signed, trap on overflow)
+                elif funct == 0x21: self._set_register(rd, (reg_rs_val + reg_rt_val))
+                elif funct == 0x22: # sub
                     result = reg_rs_val - reg_rt_val
                     if (reg_rs_val ^ reg_rt_val) & (reg_rs_val ^ result) & 0x80000000: self._runtime_error("Arithmetic overflow")
                     else: self._set_register(rd, to_signed_32(result))
-                elif funct == 0x23: # subu $rd, $rs, $rt (Subtract Unsigned)
-                    self._set_register(rd, (reg_rs_val - reg_rt_val))
-                elif funct == 0x24: self._set_register(rd, reg_rs_val & reg_rt_val) # and
-                elif funct == 0x25: self._set_register(rd, reg_rs_val | reg_rt_val) # or
-                elif funct == 0x26: self._set_register(rd, reg_rs_val ^ reg_rt_val) # xor
-                elif funct == 0x27: self._set_register(rd, ~(reg_rs_val | reg_rt_val)) # nor
-                elif funct == 0x2a: self._set_register(rd, 1 if to_signed_32(reg_rs_val) < to_signed_32(reg_rt_val) else 0) # slt
-                elif funct == 0x2b: self._set_register(rd, 1 if (reg_rs_val & 0xFFFFFFFF) < (reg_rt_val & 0xFFFFFFFF) else 0) # sltu
-                elif funct == 0x00: # sll $rd, $rt, shamt
+                elif funct == 0x23: self._set_register(rd, (reg_rs_val - reg_rt_val))
+                elif funct == 0x24: self._set_register(rd, reg_rs_val & reg_rt_val)
+                elif funct == 0x25: self._set_register(rd, reg_rs_val | reg_rt_val)
+                elif funct == 0x26: self._set_register(rd, reg_rs_val ^ reg_rt_val)
+                elif funct == 0x27: self._set_register(rd, ~(reg_rs_val | reg_rt_val))
+                elif funct == 0x2a: self._set_register(rd, 1 if to_signed_32(reg_rs_val) < to_signed_32(reg_rt_val) else 0)
+                elif funct == 0x2b: self._set_register(rd, 1 if (reg_rs_val & 0xFFFFFFFF) < (reg_rt_val & 0xFFFFFFFF) else 0)
+                elif funct == 0x00: 
                      if instruction != 0: self._set_register(rd, reg_rt_val << shamt)
-                elif funct == 0x02: # srl $rd, $rt, shamt
-                     unsigned_rt = reg_rt_val & 0xFFFFFFFF; self._set_register(rd, unsigned_rt >> shamt)
-                elif funct == 0x03: # sra $rd, $rt, shamt
-                     signed_rt = to_signed_32(reg_rt_val); self._set_register(rd, signed_rt >> shamt)
-                elif funct == 0x04: # sllv $rd, $rt, $rs
-                     shift_amount = reg_rs_val & 0x1F; self._set_register(rd, reg_rt_val << shift_amount)
-                elif funct == 0x06: # srlv $rd, $rt, $rs
-                     shift_amount = reg_rs_val & 0x1F; unsigned_rt = reg_rt_val & 0xFFFFFFFF; self._set_register(rd, unsigned_rt >> shift_amount)
-                elif funct == 0x07: # srav $rd, $rt, $rs
-                     shift_amount = reg_rs_val & 0x1F; signed_rt = to_signed_32(reg_rt_val); self._set_register(rd, signed_rt >> shift_amount)
-                elif funct == 0x08: # jr $rs
+                elif funct == 0x02: self._set_register(rd, (reg_rt_val & 0xFFFFFFFF) >> shamt)
+                elif funct == 0x03: self._set_register(rd, to_signed_32(reg_rt_val) >> shamt)
+                elif funct == 0x04: self._set_register(rd, reg_rt_val << (reg_rs_val & 0x1F))
+                elif funct == 0x06: self._set_register(rd, (reg_rt_val & 0xFFFFFFFF) >> (reg_rs_val & 0x1F))
+                elif funct == 0x07: self._set_register(rd, to_signed_32(reg_rt_val) >> (reg_rs_val & 0x1F))
+                elif funct == 0x08: # jr
                      target_addr = reg_rs_val
                      if target_addr % 4 != 0: self._runtime_error(f"Jump Register target address unaligned: 0x{target_addr:08x}")
                      else: pc_next = target_addr; branch_taken = True
-                elif funct == 0x09: # jalr $rd, $rs
+                elif funct == 0x09: # jalr
                      target_addr = reg_rs_val
                      if target_addr % 4 != 0: self._runtime_error(f"Jump and Link Register target address unaligned: 0x{target_addr:08x}")
                      else:
                           return_addr = self.pc + 8; dest_reg = rd if rd != 0 else 31
                           self._set_register(dest_reg, return_addr)
                           pc_next = target_addr; branch_taken = True
-                elif funct == 0x10: self._set_register(rd, self.hi) # mfhi
-                elif funct == 0x11: self.hi = reg_rs_val # mthi
-                elif funct == 0x12: self._set_register(rd, self.lo) # mflo
-                elif funct == 0x13: self.lo = reg_rs_val # mtlo
-                elif funct == 0x18: # mult $rs, $rt
+                elif funct == 0x10: self._set_register(rd, self.hi)
+                elif funct == 0x11: self.hi = reg_rs_val
+                elif funct == 0x12: self._set_register(rd, self.lo)
+                elif funct == 0x13: self.lo = reg_rs_val
+                elif funct == 0x18: # mult
                      result = to_signed_32(reg_rs_val) * to_signed_32(reg_rt_val)
                      self.lo = result & 0xFFFFFFFF; self.hi = (result >> 32) & 0xFFFFFFFF
-                elif funct == 0x19: # multu $rs, $rt
+                elif funct == 0x19: # multu
                      result = (reg_rs_val & 0xFFFFFFFF) * (reg_rt_val & 0xFFFFFFFF)
                      self.lo = result & 0xFFFFFFFF; self.hi = (result >> 32) & 0xFFFFFFFF
-                elif funct == 0x1a: # div $rs, $rt
+                elif funct == 0x1a: # div
                      rs_signed = to_signed_32(reg_rs_val); rt_signed = to_signed_32(reg_rt_val)
                      if rt_signed == 0: self._runtime_error("Division by zero")
                      else:
                           quotient = int(rs_signed / rt_signed); remainder = rs_signed % rt_signed
-                          # Adjust remainder sign for MIPS convention if needed (implementation detail)
-                          if (remainder != 0) and ((rs_signed < 0) != (rt_signed < 0)):
-                              # This standard remainder logic might differ slightly from MIPS spec edge cases
-                              pass
                           self.lo = quotient & 0xFFFFFFFF; self.hi = remainder & 0xFFFFFFFF
-                elif funct == 0x1b: # divu $rs, $rt
+                elif funct == 0x1b: # divu
                      rs_unsigned = reg_rs_val & 0xFFFFFFFF; rt_unsigned = reg_rt_val & 0xFFFFFFFF
                      if rt_unsigned == 0: self._runtime_error("Division by zero")
                      else:
                           self.lo = (rs_unsigned // rt_unsigned) & 0xFFFFFFFF
                           self.hi = (rs_unsigned % rt_unsigned) & 0xFFFFFFFF
-                elif funct == 0x0c: pc_next = self._execute_syscall() # syscall
-                elif funct == 0x0d: self._runtime_error("BREAK instruction encountered", is_break=True) # break
+                elif funct == 0x0c: pc_next = self._execute_syscall()
+                elif funct == 0x0d: self._runtime_error("BREAK instruction encountered", is_break=True)
                 else: self._unimplemented_instruction(instruction, "R-Type", funct=funct)
-
+                
             # --- J-Type ---
-            elif opcode in [0x2, 0x3]: # j, jal
+            elif opcode in [0x2, 0x3]:
                 target_addr = (addr << 2) | (self.pc & 0xF0000000)
-                if opcode == 0x3: self._set_register(31, self.pc + 8) # $ra
+                if opcode == 0x3: self._set_register(31, self.pc + 8)
                 pc_next = target_addr; branch_taken = True
-
+                
             # --- Branch Instructions ---
-            elif opcode == 0x4: # beq $rs, $rt, offset
+            elif opcode == 0x4:
                  if reg_rs_val == reg_rt_val: pc_next = self.pc + 4 + (imm_signed * 4); branch_taken = True
-            elif opcode == 0x5: # bne $rs, $rt, offset
+            elif opcode == 0x5:
                  if reg_rs_val != reg_rt_val: pc_next = self.pc + 4 + (imm_signed * 4); branch_taken = True
-            elif opcode == 0x6: # blez $rs, offset
+            elif opcode == 0x6:
                  if to_signed_32(reg_rs_val) <= 0: pc_next = self.pc + 4 + (imm_signed * 4); branch_taken = True
-            elif opcode == 0x7: # bgtz $rs, offset
+            elif opcode == 0x7:
                  if to_signed_32(reg_rs_val) > 0: pc_next = self.pc + 4 + (imm_signed * 4); branch_taken = True
-            # --- REGIMM (opcode == 1) ---
             elif opcode == 0x1:
-                 if rt == 0x0: # bltz $rs, offset
+                 if rt == 0x0:
                      if to_signed_32(reg_rs_val) < 0: pc_next = self.pc + 4 + (imm_signed * 4); branch_taken = True
-                 elif rt == 0x1: # bgez $rs, offset
+                 elif rt == 0x1:
                      if to_signed_32(reg_rs_val) >= 0: pc_next = self.pc + 4 + (imm_signed * 4); branch_taken = True
-                 elif rt == 0x10: # bltzal $rs, offset
+                 elif rt == 0x10:
                      if to_signed_32(reg_rs_val) < 0:
                          self._set_register(31, self.pc + 8); pc_next = self.pc + 4 + (imm_signed * 4); branch_taken = True
-                 elif rt == 0x11: # bgezal $rs, offset
+                 elif rt == 0x11:
                      if to_signed_32(reg_rs_val) >= 0:
                          self._set_register(31, self.pc + 8); pc_next = self.pc + 4 + (imm_signed * 4); branch_taken = True
                  else: self._unimplemented_instruction(instruction, "REGIMM", rt=rt)
-
+                 
             # --- Other I-Type Instructions ---
-            elif opcode == 0x8: # addi $rt, $rs, imm_signed
+            elif opcode == 0x8:
                  result = reg_rs_val + imm_signed
                  if (reg_rs_val ^ result) & (imm_signed ^ result) & 0x80000000: self._runtime_error("Arithmetic overflow")
                  else: self._set_register(rt, to_signed_32(result))
-            elif opcode == 0x9: # addiu $rt, $rs, imm_signed
-                 self._set_register(rt, reg_rs_val + imm_signed)
-            elif opcode == 0xa: # slti $rt, $rs, imm_signed
-                 self._set_register(rt, 1 if to_signed_32(reg_rs_val) < imm_signed else 0)
-            elif opcode == 0xb: # sltiu $rt, $rs, imm_unsigned (compare rs unsigned with SIGNED immediate)
-                 # MIPS spec comparison is unsigned rs < signed immediate
-                 self._set_register(rt, 1 if (reg_rs_val & 0xFFFFFFFF) < imm_signed else 0)
-            elif opcode == 0xc: self._set_register(rt, reg_rs_val & imm)    # andi
-            elif opcode == 0xd: self._set_register(rt, reg_rs_val | imm)    # ori
-            elif opcode == 0xe: self._set_register(rt, reg_rs_val ^ imm)    # xori
-            elif opcode == 0xf: self._set_register(rt, imm << 16)           # lui
-            elif opcode == 0x20: # lb $rt, offset($rs)
+            elif opcode == 0x9: self._set_register(rt, reg_rs_val + imm_signed)
+            elif opcode == 0xa: self._set_register(rt, 1 if to_signed_32(reg_rs_val) < imm_signed else 0)
+            elif opcode == 0xb: self._set_register(rt, 1 if (reg_rs_val & 0xFFFFFFFF) < imm_signed else 0)
+            elif opcode == 0xc: self._set_register(rt, reg_rs_val & imm)
+            elif opcode == 0xd: self._set_register(rt, reg_rs_val | imm)
+            elif opcode == 0xe: self._set_register(rt, reg_rs_val ^ imm)
+            elif opcode == 0xf: self._set_register(rt, imm << 16)
+            elif opcode == 0x20:
                  mem_addr = (reg_rs_val + imm_signed); value = self.read_memory(mem_addr, 1)
                  if self.state != 'error': self._set_register(rt, value)
-            elif opcode == 0x21: # lh $rt, offset($rs)
+            elif opcode == 0x21:
                  mem_addr = (reg_rs_val + imm_signed); value = self.read_memory(mem_addr, 2)
                  if self.state != 'error': self._set_register(rt, value)
-            elif opcode == 0x23: # lw $rt, offset($rs)
+            elif opcode == 0x23:
                  mem_addr = (reg_rs_val + imm_signed); value = self.read_memory(mem_addr, 4)
                  if self.state != 'error': self._set_register(rt, value)
-            elif opcode == 0x24: # lbu $rt, offset($rs)
+            elif opcode == 0x24:
                  mem_addr = (reg_rs_val + imm_signed); value = self.read_memory_unsigned(mem_addr, 1)
                  if self.state != 'error': self._set_register(rt, value)
-            elif opcode == 0x25: # lhu $rt, offset($rs)
+            elif opcode == 0x25:
                  mem_addr = (reg_rs_val + imm_signed); value = self.read_memory_unsigned(mem_addr, 2)
                  if self.state != 'error': self._set_register(rt, value)
-            elif opcode == 0x28: # sb $rt, offset($rs)
+            elif opcode == 0x28:
                  mem_addr = (reg_rs_val + imm_signed); self.write_memory(mem_addr, reg_rt_val, 1)
-            elif opcode == 0x29: # sh $rt, offset($rs)
+            elif opcode == 0x29:
                  mem_addr = (reg_rs_val + imm_signed); self.write_memory(mem_addr, reg_rt_val, 2)
-            elif opcode == 0x2b: # sw $rt, offset($rs)
+            elif opcode == 0x2b:
                  mem_addr = (reg_rs_val + imm_signed); self.write_memory(mem_addr, reg_rt_val, 4)
-            # --- Unimplemented ---
             else:
-                self._unimplemented_instruction(instruction, "I/J-Type", opcode=opcode)
-
-
-            # --- Post-Execution: Update PC & State ---
-            self.registers[0] = 0 # Ensure $zero is always zero
-
-            # Advance PC unless an error occurred or program finished/waiting
+                 self._unimplemented_instruction(instruction, "I/J-Type", opcode=opcode)
+                 
+            self.registers[0] = 0
             if self.state not in ["error", "finished", "input_wait"]:
                 self.pc = pc_next
-                # State remains 'running' if called from run loop, otherwise becomes 'paused'
-                # The run() method handles setting state back to 'paused' when loop ends.
                 if self.state != "running":
                      self.state = "paused"
-
-            # Logging for flow control
+                     
             if branch_taken: logger.debug(f"Branch/Jump taken. New PC=0x{self.pc:08x}")
             elif self.state == "paused" or self.state == "running": logger.debug(f"Instruction executed. New PC=0x{self.pc:08x}")
-
+            
         except Exception as e:
-             # Catch unexpected runtime exceptions during execution logic
              self._runtime_error(f"Runtime exception: {e}")
-             logger.error(f"Runtime exception at PC 0x{prev_pc:08x}", exc_info=True) # Log traceback
-             self.pc = prev_pc # Keep PC at the instruction causing the error
-
-        return self.get_state() # Return the simulator's current state
+             logger.error(f"Runtime exception at PC 0x{prev_pc:08x}", exc_info=True)
+             self.pc = prev_pc
 
     def _set_register(self, reg_index, value):
         """Internal helper to set a register value, ensuring $zero ($0) is ignored and value is 32-bit."""
@@ -621,58 +606,43 @@ class MipsSimulator:
 
         return False # Fallback, should not be reached if success or exception occurs
 
-    def run(self, step_limit=MAX_STEPS):
-        """Runs the simulation continuously until pause, finish, error, input needed, or step limit."""
+    def yield_state(self, step_limit=1000000):
+        """Generator that yields simulator state after each cycle."""
         if self.state not in ["loaded", "paused"]:
             logger.warning(f"Cannot run, simulator state is '{self.state}'")
-            return self.get_state()
+            yield self.get_state()
+            return
 
-        logger.info(f"Running simulation... (Limit: {step_limit} steps)")
-        self.state = "running" # Set state to running
-        self.pause_requested = False # Ensure pause flag is clear
-        start_time = time.time()
-
+        self.state = "running"
+        self.pause_requested = False
         steps_taken_this_run = 0
-        # --- FIX: Check pause request *before* step and refine loop condition ---
-        while steps_taken_this_run < step_limit:
-            # Check conditions that stop the run loop BEFORE executing the step
-            if self.state != "running": break # e.g., became error/finished/input_wait inside previous step
-            if self.pause_requested:
-                self.state = "paused" # Update state if pause was requested
-                self.pause_requested = False # Clear the flag
-                logger.info("Run loop paused by request.")
-                break # Exit loop
 
-            # Execute one step. step() will update self.state if needed.
+        while steps_taken_this_run < step_limit:
+            if self.state != "running": break
+            if self.pause_requested:
+                self.state = "paused"
+                self.pause_requested = False
+                yield self.get_state()
+                break
+
             self.step()
             steps_taken_this_run += 1
-
-            # Exit loop immediately if step caused finish/error/input_wait
+            yield self.get_state()
+            
             if self.state != "running": break
-        # --- END FIX ---
 
-        end_time = time.time()
-
-        # Check if loop terminated due to step limit while still running
         if steps_taken_this_run >= step_limit and self.state == "running":
-            self.state = "paused" # Force pause if limit reached
+            self.state = "paused"
             self.error_message = f"Run stopped: Maximum simulation steps ({step_limit}) exceeded."
-            logger.warning(self.error_message) # Log limit reached
+            logger.warning(self.error_message)
+            yield self.get_state()
 
-        # Final log message based on why the loop stopped
-        if self.state == "paused" and not self.error_message: # Ensure error message isn't overwritten
-            logger.info(f"Run paused. Steps this run: {steps_taken_this_run}.")
-        elif self.state == "finished":
-            logger.info(f"Run finished. Reason: {self.termination_reason}. Steps this run: {steps_taken_this_run}.")
-        elif self.state == "error":
-             logger.info(f"Run stopped due to error after {steps_taken_this_run} steps.")
-        elif self.state == "input_wait":
-            logger.info(f"Run paused for input after {steps_taken_this_run} steps.")
-
-
-        logger.info(f"Run complete. Final State: {self.state}. Total steps: {self.steps_executed}. Time: {end_time - start_time:.3f}s")
-        self.pause_requested = False # Ensure flag is clear
-        return self.get_state()
+    def run(self, step_limit=1000000):
+        """Runs the simulation continuously until pause, finish, error, etc."""
+        last_state = self.get_state()
+        for state in self.yield_state(step_limit):
+            last_state = state
+        return last_state
 
     def request_pause(self):
         """Signals the run loop to pause at the next convenient point."""
