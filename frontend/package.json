@@ -11,18 +11,24 @@
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "axios": "^1.8.4",
+    "lucide-react": "^1.45.0",
     "monaco-editor": "^0.52.2",
     "next": "15.3.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "autoprefixer": "^10.6.0",
     "eslint": "^9",
     "eslint-config-next": "15.3.0",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5"
   }
 }
