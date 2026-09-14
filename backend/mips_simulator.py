@@ -36,6 +36,10 @@ class MipsSimulator:
 
     def reset(self):
         """Resets the simulator to its initial state before loading a program."""
+        import collections
+        self.history = collections.deque(maxlen=1000)
+        self.current_delta = None
+        
         self.coproc0 = MipsCoproc0()
         # General Purpose Registers (GPRs) initialized to 0
         self.registers = [0] * 32
@@ -169,7 +173,10 @@ class MipsSimulator:
 
             # Write the packed bytes into the memory dictionary
             for i in range(num_bytes):
-                self.memory[address + i] = value_bytes[i]
+                addr = address + i
+                if self.current_delta is not None and addr not in self.current_delta["memory_modified"]:
+                    self.current_delta["memory_modified"][addr] = self.memory[addr]
+                self.memory[addr] = value_bytes[i]
             return True # Indicate success
 
         except struct.error as e:
@@ -254,16 +261,65 @@ class MipsSimulator:
             logger.warning(f"Cannot step, simulator state is '{self.state}'")
             return self.get_state()
 
+        self.current_delta = {
+            "pc": self.pc,
+            "state": self.state,
+            "hi": self.hi,
+            "lo": self.lo,
+            "persistent_output": self.persistent_output,
+            "exit_code": self.exit_code,
+            "termination_reason": self.termination_reason,
+            "registers_modified": {},
+            "memory_modified": {}
+        }
+
         try:
             instruction = self.fetch()
             if instruction is None:
+                self.current_delta = None
                 return self.get_state()
                 
             decoded = self.decode(instruction)
             self.execute(decoded)
         except HardwareException:
             pass # Exception handled, PC is at 0x80000180
+            
+        if self.current_delta is not None:
+            self.history.append(self.current_delta)
+            self.current_delta = None
         
+        return self.get_state()
+        
+    def step_backward(self):
+        """
+        Pops the last state delta from history and restores the previous state.
+        Returns the updated state dictionary.
+        """
+        if not self.history:
+            logger.warning("Cannot step backward, history is empty.")
+            return self.get_state()
+            
+        delta = self.history.pop()
+        self.pc = delta["pc"]
+        self.state = delta["state"]
+        self.hi = delta["hi"]
+        self.lo = delta["lo"]
+        self.persistent_output = delta["persistent_output"]
+        self.exit_code = delta["exit_code"]
+        self.termination_reason = delta["termination_reason"]
+        
+        for reg_index, old_val in delta["registers_modified"].items():
+            self.registers[reg_index] = old_val
+            
+        for addr, old_val in delta["memory_modified"].items():
+            if old_val == 0 and addr not in self.memory:
+                pass # it was uninitialized
+            self.memory[addr] = old_val
+            
+        # Ensure simulator is in a ready state
+        if self.state in ["running", "input_wait"]:
+            self.state = "paused"
+            
         return self.get_state()
         
     def fetch(self):
@@ -481,6 +537,8 @@ class MipsSimulator:
         """Internal helper to set a register value, ensuring $zero ($0) is ignored and value is 32-bit."""
         if 0 < reg_index < 32:
              unsigned_value = value & 0xFFFFFFFF # Mask to 32 bits
+             if self.current_delta is not None and reg_index not in self.current_delta["registers_modified"]:
+                 self.current_delta["registers_modified"][reg_index] = self.registers[reg_index]
              self.registers[reg_index] = unsigned_value
              logger.debug(f"Set Register ${reg_index} = 0x{unsigned_value:08x} ({to_signed_32(unsigned_value)})")
         elif reg_index == 0: pass # Ignore writes to $zero

@@ -795,10 +795,29 @@ class MipsAssembler:
         # Format output regardless of errors (might have partial results)
         formatted_output = []
         for code in self.machine_code: # Iterate over generated integer codes
+             opcode = (code >> 26) & 0x3F
+             rs = (code >> 21) & 0x1F
+             rt = (code >> 16) & 0x1F
+             rd = (code >> 11) & 0x1F
+             shamt = (code >> 6) & 0x1F
+             funct = code & 0x3F
+             imm = code & 0xFFFF
+             addr = code & 0x03FFFFFF
+             
              formatted_output.append({
                  "hex": f"0x{code:08x}",
                  "bin": f"{code:032b}",
-                 "dec": str(code) # Unsigned decimal representation
+                 "dec": str(code), # Unsigned decimal representation
+                 "bit_fields": {
+                     "opcode": opcode,
+                     "rs": rs,
+                     "rt": rt,
+                     "rd": rd,
+                     "shamt": shamt,
+                     "funct": funct,
+                     "imm": imm,
+                     "addr": addr
+                 }
              })
 
         hex_data = self.data_segment.hex()

@@ -1,9 +1,12 @@
 // frontend/src/app/page.tsx
 'use client'; // Indicate this is a Client Component (uses hooks, event handlers)
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import axios from 'axios'; // For making API requests to the backend
-import Editor, { Monaco, OnMount } from '@monaco-editor/react'; // Monaco code editor component and types
+import Editor, { BitFields } from '../components/Editor';
+import Shell from '../components/Shell';
+import ExecutionControls from '../components/ExecutionControls';
+import { useUIStore } from '../store/useUIStore';
 
 // Define the base URL for the backend API
 const API_BASE_URL = 'http://localhost:5001/api'; // Adjust if your backend runs elsewhere
@@ -18,6 +21,7 @@ interface MachineCodeOutput {
     hex: string; // Hexadecimal representation (e.g., "0x24020001")
     bin: string; // Binary representation (e.g., "00100100000000100000000000000001")
     dec: string; // Unsigned decimal representation
+    bit_fields?: BitFields;
 }
 
 // Defines the structure for errors returned from the backend API
@@ -40,122 +44,6 @@ interface SimulatorState {
     output: string;             // Accumulated output from print syscalls
     input_needed: boolean;      // Flag indicating if simulator needs input (e.g., read_int syscall)
     memory_view: { [address: number]: number }; // Dictionary mapping memory address to word value for display
-}
-
-// --- MIPS Language Definition for Monaco Editor ---
-// This function registers the 'mips' language with Monaco and defines its syntax highlighting rules and theme.
-function setupMipsLanguage(monaco: Monaco) {
-  // Check if the language is already registered to prevent errors, especially during development hot reloads
-  const languages = monaco.languages.getLanguages();
-  if (languages.some(lang => lang.id === 'mips')) {
-     console.log("MIPS language already registered.");
-     return; // Exit if already registered
-  }
-  console.log("Registering MIPS language.");
-
-  // Register the language identifier
-  monaco.languages.register({ id: 'mips' });
-
-  // Define the tokenization rules using Monarch syntax (a state-based tokenizer)
-  monaco.languages.setMonarchTokensProvider('mips', {
-    // Define lists of known keywords and registers for easier reference in rules
-    registers: [ // All common MIPS register names (including numeric)
-      '$zero', '$at', '$v0', '$v1', '$a0', '$a1', '$a2', '$a3',
-      '$t0', '$t1', '$t2', '$t3', '$t4', '$t5', '$t6', '$t7',
-      '$s0', '$s1', '$s2', '$s3', '$s4', '$s5', '$s6', '$s7',
-      '$t8', '$t9', '$k0', '$k1', '$gp', '$sp', '$fp', '$ra',
-      '$0', '$1', '$2', '$3', '$4', '$5', '$6', '$7', '$8', '$9', '$10',
-      '$11', '$12', '$13', '$14', '$15', '$16', '$17', '$18', '$19', '$20',
-      '$21', '$22', '$23', '$24', '$25', '$26', '$27', '$28', '$29', '$30', '$31'
-    ],
-    keywords: [ // MIPS instruction mnemonics
-      'add', 'addu', 'addi', 'addiu', 'sub', 'subu', 'and', 'andi', 'or', 'ori',
-      'xor', 'xori', 'nor', 'slt', 'sltu', 'slti', 'sltiu', 'sll', 'srl', 'sra',
-      'sllv', 'srlv', 'srav', 'lw', 'sw', 'lb', 'sb', 'lh', 'sh', 'lui', 'lbu', 'lhu',
-      'beq', 'bne', 'blez', 'bgtz', 'bltz', 'bgez', 'j', 'jal', 'jr', 'jalr',
-      'syscall', 'break', 'mfhi', 'mflo', 'mthi', 'mtlo', 'mult', 'multu', 'div', 'divu',
-      'bltzal', 'bgezal',
-      // Common Pseudo Instructions (highlight as keywords for visibility)
-      'move', 'li', 'la', 'blt', 'bgt', 'ble', 'bge', 'nop', 'clear'
-    ],
-    directives: [ // Assembler directives (start with '.')
-        '.data', '.text', '.globl', '.extern', '.word', '.byte', '.half', '.space', '.asciiz', '.ascii', '.align'
-    ],
-    tokenizer: { // Define states and rules for tokenizing the code
-      root: [ // Default state
-        // Comments (start with # until end of line) -> 'comment' token type
-        [/#.*$/, 'comment'],
-
-        // Directives (start with . at beginning of line) -> 'keyword.directive', switch to directive_args state
-        [/^\s*\.[a-zA-Z]+/, { token: 'keyword.directive', next: '@directive_args'}],
-
-        // Labels (identifier followed by : at beginning of line) -> 'type.identifier' token type
-        [/^([a-zA-Z_]\w*)\s*:/, 'type.identifier'],
-
-        // Keywords, Registers, Identifiers (order matters for precedence)
-        [/[$.a-zA-Z_]\w*/, { // Match potential keywords, registers, or identifiers
-          cases: { // Check against predefined lists
-            '@keywords': 'keyword', // If it's in the keywords list
-            '@registers': 'variable.predefined', // If it's in the registers list
-            '@default': 'identifier' // Otherwise, it's a general identifier (like a label usage)
-          }
-        }],
-
-        // Numbers (hexadecimal starting with 0x, or decimal)
-        [/0[xX][0-9a-fA-F]+/, 'number.hex'],
-        [/-?\d+/, 'number'],
-
-        // Strings (double-quoted)
-        [/"([^"\\]|\\.)*$/, 'string.invalid'], // Handle unterminated strings -> 'string.invalid'
-        [/"/, { token: 'string.quote', bracket: '@open', next: '@string' }], // Start of string -> 'string.quote', switch to string state
-
-        // Delimiters (commas, parentheses) -> 'delimiter' token type
-        [/[(),]/, 'delimiter'],
-      ],
-      // State for handling arguments after a directive (allows strings)
-      directive_args: [
-          [/#.*$/, 'comment', '@pop'], // Comment ends args state, pop back to root
-          [/"([^"\\]|\\.)*$/, 'string.invalid', '@pop'], // Unterminated string ends state, pop back
-          [/"/, { token: 'string.quote', bracket: '@open', next: '@string_in_directive' }], // Enter specific string state
-          [/[^#"]+/, ''], // Consume other non-string, non-comment arguments (no specific token type)
-          [/$/, '', '@pop'] // End of line ends args state, pop back
-      ],
-      // State specifically for strings within directive arguments
-      string_in_directive: [
-          [/[^\\"]+/, 'string'], // String content -> 'string'
-          [/\\./, 'string.escape'], // Handle simple escapes like \" or \\ -> 'string.escape'
-          [/"/, { token: 'string.quote', bracket: '@close', next: '@pop' }] // End quote -> 'string.quote', pop back to directive_args
-      ],
-      // General string state (if needed for future language features)
-      string: [
-          [/[^\\"]+/, 'string'],
-          [/\\./, 'string.escape.invalid'], // Mark escapes as invalid here by default if not handled
-          [/"/, { token: 'string.quote', bracket: '@close', next: '@pop' }] // End quote, pop back to root
-      ],
-    }
-  });
-
-  // Define a custom theme for the editor (optional, provides specific colors)
-  monaco.editor.defineTheme('mips-dark', {
-      base: 'vs-dark', // Inherit from the built-in VS Dark theme
-      inherit: true,   // Apply inherited rules
-      rules: [ // Define specific colors for token types identified by the tokenizer
-          { token: 'keyword', foreground: 'C586C0' },           // Instructions etc.: Pink/Purple
-          { token: 'keyword.directive', foreground: '4FD0FF' },  // Directives (.data, .text): Light Blue
-          { token: 'variable.predefined', foreground: '9CDCFE' },// Registers ($t0, $sp): Blue
-          { token: 'number', foreground: 'B5CEA8'},            // Numbers: Green
-          { token: 'comment', foreground: '6A9955', fontStyle: 'italic' }, // Comments: Green Italic
-          { token: 'string', foreground: 'CE9178' },           // Strings: Orange
-          { token: 'type.identifier', foreground: 'DCDCAA' },   // Label definitions (label:): Yellow
-          { token: 'identifier', foreground: 'D4D4D4'},        // Label usages/other identifiers: Default Grey
-          { token: 'delimiter', foreground: 'D4D4D4'},         // Commas, parentheses: Default Grey
-      ],
-      colors: { // Define general editor colors (optional overrides)
-          'editor.foreground': '#D4D4D4', // Default text color
-          // Add other color overrides if needed (e.g., 'editor.background')
-      }
-  });
-    console.log("MIPS language and theme defined.");
 }
 
 // --- Helper Functions for Component ---
@@ -548,50 +436,8 @@ export default function Home() {
 
     }, [simState, userInput]); // Dependencies on state and the user input value
 
-    // --- Highlight Line Logic ---
-    // useEffect hook to update Monaco editor decorations when the PC changes
-    useEffect(() => {
-        // Ensure editor, monaco API, simulator state, PC, and address map are available
-        if (editorRef.current && monacoRef.current && simState?.pc !== undefined && addressMap) {
-            const currentPc = simState.pc;
-            const currentLine = addressMap[currentPc]; // Find source line number for current PC using the map
-
-            const newDecorations: monaco.editor.IModelDeltaDecoration[] = []; // Array for new decorations
-
-            // Add highlight decoration only if PC maps to a line and simulator is active
-            if (currentLine !== undefined && simState.state !== 'finished' && simState.state !== 'error') {
-                 newDecorations.push({
-                    range: new monacoRef.current.Range(currentLine, 1, currentLine, 1), // Decorate the whole line
-                    options: {
-                        isWholeLine: true,
-                        className: 'current-execution-line', // CSS class for styling the highlight
-                        // glyphMarginClassName: 'current-execution-gutter', // Optional: class for gutter icon
-                    }
-                });
-                 // Try to scroll the highlighted line into view
-                 editorRef.current.revealLineInCenterIfOutsideViewport(currentLine, monacoRef.current.editor.ScrollType.Smooth);
-            }
-
-            // Atomically remove old decorations and add new ones
-            // Pass the array of *previous* decoration IDs to remove them
-            // Pass the array of *new* decoration objects to add them
-            // Store the IDs of the *newly created* decorations for the next update
-            editorDecorationsRef.current = editorRef.current.deltaDecorations(
-                editorDecorationsRef.current, // Old decoration IDs to remove
-                newDecorations                // New decorations to add
-             );
-
-        } else if(editorRef.current) {
-             // If state is not suitable for highlighting (e.g., finished, error, no map), clear existing decorations
-             editorDecorationsRef.current = editorRef.current.deltaDecorations(
-                editorDecorationsRef.current, // Old decoration IDs
-                []                            // No new decorations
-             );
-        }
-    // This effect runs whenever the PC, simulator state, or address map changes
-    }, [simState?.pc, simState?.state, addressMap]);
-
-
+    const { viewMode } = useUIStore();
+    
     // --- Render ---
     // Determine button enable/disable states based on current application/simulator status
     const canLoadSim = !!lastAssembleResult; // Can load if assembly succeeded
@@ -600,60 +446,111 @@ export default function Home() {
     const canPauseSim = simState && simState.state === "running"; // Can pause only if currently running
     const canResetSim = !!simState; // Can reset if simulator has been loaded at least once
     const isWaitingForInput = simState?.state === 'input_wait'; // Check if waiting for user input
+    
+    const bitFieldsMap = useMemo(() => {
+        const map: Record<number, BitFields> = {};
+        if (lastAssembleResult) {
+            Object.entries(addressMap).forEach(([addr, lineNum]) => {
+                const instrIdx = (parseInt(addr) - 0x00400000) / 4;
+                if (instrIdx >= 0 && instrIdx < lastAssembleResult.machine_code.length) {
+                    const bf = lastAssembleResult.machine_code[instrIdx].bit_fields;
+                    if (bf) map[lineNum] = bf;
+                }
+            });
+        }
+        return map;
+    }, [lastAssembleResult, addressMap]);
+
+    let currentLine: number | undefined = undefined;
+    if (simState?.pc !== undefined && addressMap && simState.state !== 'finished' && simState.state !== 'error') {
+        currentLine = addressMap[simState.pc];
+    }
+    
+    const handleStepBackwardSimulation = useCallback(() => {
+        if (!simState || !["loaded", "paused", "input_wait"].includes(simState.state)) { return; }
+        setErrorMessages([]);
+        setPrevSimState(simState);
+        
+        axios.post<SimulatorState>(`${API_BASE_URL}/simulate/step_backward`)
+            .then(response => {
+                setSimState(response.data);
+                if (response.data.state === 'error') {
+                    setErrorMessages([{ message: `Runtime Error: ${response.data.error || 'Unknown error'}` }]);
+                }
+            })
+            .catch(error => {
+                console.error("Sim Step Backward Error:", error);
+                const backendMessage = error?.response?.data?.error || error?.response?.data?.message;
+                const fallbackMessage = error instanceof Error ? error.message : "Failed to step backward simulation.";
+                setErrorMessages([{ message: `Sim Step Backward Error: ${backendMessage || fallbackMessage}` }]);
+            });
+    }, [simState]);
+
 
     return (
-        <main className="container">
-            <h1>MIPS Assembler & Simulator</h1>
-            <p>{pingResponse}</p>
+        <Shell controls={
+            <ExecutionControls
+                onStepBack={handleStepBackwardSimulation}
+                onPause={handlePauseSimulation}
+                onRun={handleRunSimulation}
+                onStepForward={handleStepSimulation}
+                onReset={handleResetSimulation}
+                canStepBack={canStepSim && simState !== null} // Simple condition for now
+                canPause={canPauseSim}
+                canRun={canRunSim && !isWaitingForInput}
+                canStepForward={canStepSim && !isWaitingForInput}
+                canReset={canResetSim}
+            />
+        }>
+            {viewMode === 'Simulator' && (
+            <div className="container overflow-y-auto h-full p-4">
+                <h1>MIPS Assembler & Simulator</h1>
+                <p>{pingResponse}</p>
 
-            {/* Error Display Area */}
-            {errorMessages.length > 0 && (
-                 <div className="errorBox">
-                    <strong>Errors:</strong>
-                    <ul>
-                        {errorMessages.map((err, index) => (
-                        <li key={`err-${index}`}> {/* Use index in key */}
-                            {err.line ? `Line ${err.line}: ` : ''}{err.message}
-                            {/* Escape quotes for JSX */}
-                            {err.text ? <span className="errorTextSpan">{`(near '`} {err.text.substring(0, 30)}{err.text.length > 30 ? '...' : ''} {`')`}</span> : ''}
-                        </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
+                {/* Error Display Area */}
+                {errorMessages.length > 0 && (
+                     <div className="errorBox">
+                        <strong>Errors:</strong>
+                        <ul>
+                            {errorMessages.map((err, index) => (
+                            <li key={`err-${index}`}>
+                                {err.line ? `Line ${err.line}: ` : ''}{err.message}
+                                {err.text ? <span className="errorTextSpan">{`(near '`} {err.text.substring(0, 30)}{err.text.length > 30 ? '...' : ''} {`')`}</span> : ''}
+                            </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
 
-            {/* Top Row: Assembly and Disassembly */}
-            <div className="sectionContainer">
-                {/* Assembly Section */}
-                <div className="section">
-                    <h2>Assembly Input</h2>
-                    <div className="editorWrapper">
-                        <Editor
-                            language="mips"
-                            theme="mips-dark"
-                            value={assemblyCode}
-                            onChange={handleAssemblyChange}
-                            onMount={handleEditorDidMount} // Use onMount prop
-                            options={{ minimap: { enabled: false }, wordWrap: 'on', fontSize: 13, glyphMargin: true }} // Enable glyph margin if using gutter decorations
-                         />
-                    </div>
-                    <div className="simControls">
-                         <button onClick={handleAssemble} className="button">Assemble</button>
-                         {/* TODO: Add Export Assembly Button */}
-                    </div>
-                    <div>
-                        <h3>Machine Code Output</h3>
-                        <div className="formatSelector">
-                            <label><input type="radio" name="format" value="hex" checked={outputFormat === 'hex'} onChange={() => setOutputFormat('hex')} /> Hex</label>
-                            <label><input type="radio" name="format" value="bin" checked={outputFormat === 'bin'} onChange={() => setOutputFormat('bin')} /> Binary</label>
-                            <label><input type="radio" name="format" value="dec" checked={outputFormat === 'dec'} onChange={() => setOutputFormat('dec')} /> Decimal</label>
+                {/* Top Row: Assembly and Disassembly */}
+                <div className="sectionContainer">
+                    {/* Assembly Section */}
+                    <div className="section">
+                        <h2>Assembly Input</h2>
+                        <div className="editorWrapper" style={{ height: '400px' }}>
+                            <Editor
+                                code={assemblyCode}
+                                onChange={handleAssemblyChange}
+                                bitFieldsMap={bitFieldsMap}
+                                currentLine={currentLine}
+                             />
                         </div>
-                        <pre className="outputPre">
-                            {machineCode.map((code) => code[outputFormat]).join('\n')}
-                        </pre>
-                         {/* TODO: Add Export Binary Button */}
+                        <div className="simControls">
+                             <button onClick={handleAssemble} className="button">Assemble</button>
+                             <button onClick={handleLoadSimulation} className="button" disabled={!canLoadSim}>Load Sim</button>
+                        </div>
+                        <div>
+                            <h3>Machine Code Output</h3>
+                            <div className="formatSelector">
+                                <label><input type="radio" name="format" value="hex" checked={outputFormat === 'hex'} onChange={() => setOutputFormat('hex')} /> Hex</label>
+                                <label><input type="radio" name="format" value="bin" checked={outputFormat === 'bin'} onChange={() => setOutputFormat('bin')} /> Binary</label>
+                                <label><input type="radio" name="format" value="dec" checked={outputFormat === 'dec'} onChange={() => setOutputFormat('dec')} /> Decimal</label>
+                            </div>
+                            <pre className="outputPre">
+                                {machineCode.map((code) => code[outputFormat]).join('\n')}
+                            </pre>
+                        </div>
                     </div>
-                </div>
 
                 {/* Disassembly Section */}
                 <div className="section">
@@ -678,15 +575,7 @@ export default function Home() {
             <hr className="horizontalRule" />
 
             {/* Simulation Section */}
-            <h2>Simulation Controls & State</h2>
-            <div className="simControls">
-                 <button onClick={handleLoadSimulation} className="button" disabled={!canLoadSim}>Load Simulation</button>
-                 {/* Disable Step/Run if waiting for input */}
-                 <button onClick={handleStepSimulation} className="button" disabled={!canStepSim || isWaitingForInput}>Step</button>
-                 <button onClick={handleRunSimulation} className="button" disabled={!canRunSim || isWaitingForInput}>Run</button>
-                 <button onClick={handlePauseSimulation} className="button" disabled={!canPauseSim}>Pause</button>
-                 <button onClick={handleResetSimulation} className="button" disabled={!canResetSim}>Reset Sim</button>
-            </div>
+            <h2>Simulator State</h2>
 
             {/* Conditional rendering for simulator state display */}
             {simState ? (
@@ -795,6 +684,7 @@ export default function Home() {
                 // Message shown if simulation hasn't been loaded yet
                 <p>Assemble code and click &quot;Load Simulation&quot; to begin.</p> // Escaped quotes
             )}
-        </main>
+            )}
+        </Shell>
     );
 }

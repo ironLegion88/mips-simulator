@@ -174,6 +174,24 @@ def handle_simulate_step():
             logger.error(f"Failed to get simulator state after step error: {inner_e}", exc_info=True)
             return jsonify({"error": f"Internal server error during simulation step and state retrieval: {e}"}), 500
 
+@app.route('/api/simulate/step_backward', methods=['POST'])
+def handle_simulate_step_backward():
+    """Reverts one step in the simulator."""
+    try:
+        logger.debug("Executing simulator step_backward...")
+        state = simulator.step_backward()
+        logger.debug(f"Step backward completed. New state: {state.get('state')}, PC: 0x{state.get('pc'):08x}")
+        return jsonify(state)
+    except Exception as e:
+        logger.error(f"Unexpected error during simulation step_backward: {e}", exc_info=True)
+        try:
+            current_state = simulator.get_state()
+            current_state["error"] = current_state.get("error") or f"Internal server error during step backward: {e}"
+            current_state["state"] = "error"
+            return jsonify(current_state), 500
+        except Exception as inner_e:
+            return jsonify({"error": f"Internal server error during simulation step backward and state retrieval: {e}"}), 500
+
 @app.route('/api/simulate/run', methods=['POST'])
 def handle_simulate_run():
     """Runs the simulation until pause, finish, error, input needed, or step limit."""
