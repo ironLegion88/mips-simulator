@@ -56,6 +56,12 @@ class MipsSimulator:
         # Keys are byte addresses, values are integer byte values (0-255).
         self.memory = defaultdict(lambda: 0)
 
+        # Breakpoints and Watchpoints
+        if not hasattr(self, 'breakpoints'):
+            self.breakpoints = set()
+        if not hasattr(self, 'watchpoints'):
+            self.watchpoints = set()
+
         # Program storage
         self.instructions = [] # Holds the loaded machine code as integers
         self.instruction_map = {} # Maps PC address -> index in self.instructions for quick fetching
@@ -757,6 +763,31 @@ class MipsSimulator:
 
             self.step()
             steps_taken_this_run += 1
+            
+            # Check watchpoints using the latest history delta
+            watchpoint_hit = False
+            if self.history:
+                last_delta = self.history[-1]
+                for addr in last_delta["memory_modified"]:
+                    if addr in self.watchpoints:
+                        watchpoint_hit = True
+                        logger.info(f"Watchpoint hit at memory address 0x{addr:08x}")
+                        break
+                if not watchpoint_hit:
+                    for reg in last_delta["registers_modified"]:
+                        if reg in self.watchpoints:
+                            watchpoint_hit = True
+                            logger.info(f"Watchpoint hit at register ${reg}")
+                            break
+                            
+            if watchpoint_hit:
+                self.state = "paused"
+            
+            # Check breakpoints
+            if self.pc in self.breakpoints:
+                self.state = "paused"
+                logger.info(f"Breakpoint hit at PC 0x{self.pc:08x}")
+                
             yield self.get_state()
             
             if self.state != "running": break

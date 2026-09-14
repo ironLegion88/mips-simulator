@@ -24,9 +24,11 @@ simulator = MipsSimulator() # Instantiate the MIPS simulator
 app = Flask(__name__)
 
 # Configure CORS (Cross-Origin Resource Sharing)
-# Allow requests from the typical frontend development server origin
-# In production, restrict this to the actual frontend domain
 CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
+
+# Configure SocketIO
+from flask_socketio import SocketIO, emit
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # --- Basic Routes ---
 
@@ -194,44 +196,52 @@ def handle_simulate_step_backward():
 
 @app.route('/api/simulate/run', methods=['POST'])
 def handle_simulate_run():
-    """Runs the simulation until pause, finish, error, input needed, or step limit."""
+    """Runs the simulation until pause, finish, error, input needed, or step limit. Streams via WebSocket."""
     try:
-        # Check if simulator can start running
         if simulator.state not in ["loaded", "paused"]:
              logger.warning(f"Run request received but simulator state is '{simulator.state}'.")
              return jsonify({"error": f"Simulator not in a state that can run (state={simulator.state})."}), 400
 
-        # Extract optional step limit from request body (default to MAX_STEPS)
         data = request.get_json(silent=True)
-        step_limit = MAX_STEPS # Default from simulator module
+        step_limit = MAX_STEPS
         if data and "steps" in data:
             try:
                  limit_req = int(data["steps"])
-                 # Add a reasonable upper bound to requested steps if desired
-                 step_limit = min(limit_req, MAX_STEPS * 10) # Allow up to 10x default via request
+                 step_limit = min(limit_req, MAX_STEPS * 10)
             except (ValueError, TypeError):
-                 logger.warning(f"Invalid step limit '{data['steps']}' received, using default.")
-                 pass # Ignore invalid limit, use default MAX_STEPS
+                 pass
 
         logger.info(f"Executing simulator run (limit: {step_limit} steps)...")
-        # Execute the run method and get the final state after running
-        final_state = simulator.run(step_limit=step_limit)
-        logger.info(f"Run finished/paused. Final state: {final_state.get('state')}, PC: 0x{final_state.get('pc'):08x}")
-        # Return the complete state after the run completes or pauses
-        return jsonify(final_state)
+        
+        # Wrap the generator in a background task so HTTP request can return immediately
+        def run_sim():
+            for state in simulator.yield_state(step_limit):
+                socketio.emit('state_update', state)
+                socketio.sleep(0.01) # Add small delay to prevent blocking the event loop and allow streaming
+        
+        socketio.start_background_task(run_sim)
+        return jsonify({"message": "Simulation run started. State updates will stream via WebSocket."})
 
     except Exception as e:
-        # Catch unexpected errors during the run process
-        logger.error(f"Unexpected error during simulation run: {e}", exc_info=True)
-        try:
-            current_state = simulator.get_state()
-            current_state["error"] = current_state.get("error") or f"Internal server error during run: {e}"
-            current_state["state"] = "error" # Ensure state reflects error
-            return jsonify(current_state), 500
-        except Exception as inner_e:
-            # If even getting state fails, return a minimal error
-            logger.error(f"Failed to get simulator state after run error: {inner_e}", exc_info=True)
-            return jsonify({"error": f"Internal server error during simulation run and state retrieval: {e}"}), 500
+        logger.error(f"Unexpected error starting simulation run: {e}", exc_info=True)
+        return jsonify({"error": f"Internal server error starting simulation run: {e}"}), 500
+
+@app.route('/api/debug/breakpoints', methods=['POST'])
+def handle_set_breakpoints():
+    """Sets breakpoints and watchpoints for the simulator."""
+    try:
+        data = request.get_json()
+        if 'breakpoints' in data:
+            simulator.breakpoints = set(data['breakpoints'])
+            logger.info(f"Breakpoints updated: {simulator.breakpoints}")
+        if 'watchpoints' in data:
+            simulator.watchpoints = set(data['watchpoints'])
+            logger.info(f"Watchpoints updated: {simulator.watchpoints}")
+            
+        return jsonify({"message": "Breakpoints updated", "breakpoints": list(simulator.breakpoints), "watchpoints": list(simulator.watchpoints)})
+    except Exception as e:
+        logger.error(f"Error setting breakpoints: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/simulate/pause', methods=['POST'])
 def handle_simulate_pause():
@@ -375,4 +385,4 @@ if __name__ == '__main__':
     logger.info("Starting Flask development server...")
     # Use host='0.0.0.0' to make it accessible on the network if needed
     # Turn off debug mode for potentially better performance/stability during simulation runs
-    app.run(debug=False, port=5001, host='127.0.0.1')
+    socketio.run(app, debug=False, port=5001, host='127.0.0.1')
