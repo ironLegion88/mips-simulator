@@ -9,6 +9,10 @@ import ExecutionControls from '../components/ExecutionControls';
 import Profiler from '../components/Profiler';
 import Terminal from '../components/Terminal';
 import { useUIStore } from '../store/useUIStore';
+import PCVisualizer from '../components/PCVisualizer';
+import StackView from '../components/StackView';
+import ExamplesMenu from '../components/ExamplesMenu';
+import { exportAssembly, exportMachineCodeHex, exportMachineCodeBin } from '../utils/export';
 
 // Define the base URL for the backend API
 const API_BASE_URL = 'http://localhost:5001/api'; // Adjust if your backend runs elsewhere
@@ -31,21 +35,6 @@ interface ApiError {
   line?: number;    // Optional line number where the error occurred in the source code
   message: string; // The error description
   text?: string;    // Optional snippet of the original source text causing the error
-}
-
-// Defines the structure for the Simulator State object received from the backend
-interface SimulatorState {
-    pc: number;                 // Program Counter value
-    registers: number[];        // Array of 32 integer register values
-    hi: number;                 // HI register value (for multiplication/division)
-    lo: number;                 // LO register value (for multiplication/division)
-    state: 'idle' | 'loaded' | 'running' | 'paused' | 'finished' | 'error' | 'input_wait'; // Current simulator status
-    error: string | null;       // Error message if simulator state is 'error'
-    exit_code: number | null;   // Exit code if simulator state is 'finished' (from exit syscall)
-    termination_reason?: string;// Added termination reason description
-    output: string;             // Accumulated output from print syscalls
-    input_needed: boolean;      // Flag indicating if simulator needs input (e.g., read_int syscall)
-    memory_view: { [address: number]: number }; // Dictionary mapping memory address to word value for display
 }
 
 // --- Helper Functions for Component ---
@@ -134,10 +123,12 @@ export default function Home() {
     const editorRef = useRef<Parameters<OnMount>[0] | null>(null); // Ref to editor instance
 
     // --- Simulator State ---
-    const [simState, setSimState] = useState<SimulatorState | null>(null);
-    const [prevSimState, setPrevSimState] = useState<SimulatorState | null>(null); // Store previous state for highlighting
+    const { simState, setSimState, connectSocket, viewMode } = useUIStore();
+    const [prevSimState, setPrevSimState] = useState<any>(null); // Store previous state for highlighting
     const [lastAssembleResult, setLastAssembleResult] = useState<{ machine_code: MachineCodeOutput[], data_segment: string, address_map: { [key: number]: number } } | null>(null);
     const [addressMap, setAddressMap] = useState<{ [address: number]: number }>({});
+    const [breakpoints, setBreakpoints] = useState<number[]>([]);
+    const [watchpoints, setWatchpoints] = useState<number[]>([]);
     const editorDecorationsRef = useRef<string[]>([]); // Store Monaco decoration IDs
     const [userInput, setUserInput] = useState<string>(""); // Input field for syscalls
     const runIntervalRef = useRef<NodeJS.Timeout | null>(null); // Ref to store interval timer ID
@@ -160,6 +151,7 @@ export default function Home() {
         axios.get(`${API_BASE_URL}/ping`)
             .then(response => { setPingResponse(`Backend status: ${response.data.message}`); })
             .catch(error => { console.error("Error pinging backend:", error); setPingResponse('Backend status: Error - Could not connect'); });
+        connectSocket();
     }, []); // Empty dependency array ensures this runs only once on mount
 
     // Update assemblyCode state when the Monaco editor content changes
@@ -308,76 +300,24 @@ export default function Home() {
 
     // Handler for the "Run" button
     const handleRunSimulation = useCallback(() => {
-        // Check if simulation can start running
         if (!simState || !["loaded", "paused"].includes(simState.state)) {
             console.warn("Cannot run, invalid sim state:", simState?.state);
             return;
         }
         setErrorMessages([]);
-        setPrevSimState(simState); // Store current state before starting run
+        setPrevSimState(simState);
 
-        // Set state to running immediately for UI feedback
-        setSimState(prev => prev ? { ...prev, state: "running" } : null);
+        setSimState({ ...simState, state: "running" });
 
-        // Clear any existing interval timer from previous runs/pauses
-        if (runIntervalRef.current) {
-            clearInterval(runIntervalRef.current);
-        }
-
-        // Function to perform a single step and check if we should continue
-        const performStep = () => {
-            // Check state before making API call inside interval
-            // Need to use functional update with setSimState or access state via ref if closure becomes stale
-            setSimState(currentSimState => {
-                // If state changed externally (e.g., pause clicked, finished, error), stop interval
-                if (!currentSimState || currentSimState.state !== "running") {
-                    if (runIntervalRef.current) clearInterval(runIntervalRef.current);
-                    runIntervalRef.current = null;
-                    return currentSimState; // Return current state without stepping
-                }
-
-                // Store previous state for highlighting *before* the step call
-                setPrevSimState(currentSimState);
-
-                // Call the backend step endpoint
-                axios.post<SimulatorState>(`${API_BASE_URL}/simulate/step`)
-                    .then(response => {
-                        // Update state with the result of the step
-                        setSimState(response.data);
-
-                        // Check if the new state means we should stop running
-                        const nextState = response.data.state;
-                        if (nextState !== 'paused' && nextState !== 'running') { // Includes finished, error, input_wait
-                            if (runIntervalRef.current) clearInterval(runIntervalRef.current);
-                            runIntervalRef.current = null;
-                            console.log("Run interval stopped due to simulator state:", nextState);
-                            if (nextState === 'error') {
-                                setErrorMessages([{ message: `Runtime Error: ${response.data.error || 'Unknown error'}` }]);
-                            }
-                        }
-                    })
-                    .catch(error => {
-                        // Handle step errors during run
-                        console.error("Sim Step Error during run:", error);
-                        const backendMessage = error?.response?.data?.error || error?.response?.data?.message;
-                        const fallbackMessage = error instanceof Error ? error.message : "Failed to step simulation.";
-                        setErrorMessages([{ message: `Sim Step Error: ${backendMessage || fallbackMessage}` }]);
-                        if (runIntervalRef.current) clearInterval(runIntervalRef.current); // Stop interval on error
-                        runIntervalRef.current = null;
-                        // Try to update state to reflect the error
-                        axios.get<SimulatorState>(`${API_BASE_URL}/simulate/state`).then(res => setSimState(res.data));
-                    });
-
-                // Return the *current* state for the functional update (it will be updated async by axios)
-                // It's important to keep state as 'running' here unless axios call fails/completes
-                return currentSimState ? { ...currentSimState, state: "running" } : null;
+        axios.post(`${API_BASE_URL}/simulate/run`)
+            .catch(error => {
+                console.error("Sim Run Error:", error);
+                const backendMessage = error?.response?.data?.error || error?.response?.data?.message;
+                const fallbackMessage = error instanceof Error ? error.message : "Failed to run simulation.";
+                setErrorMessages([{ message: `Sim Run Error: ${backendMessage || fallbackMessage}` }]);
+                axios.get(`${API_BASE_URL}/simulate/state`).then(res => setSimState(res.data));
             });
-        };
-
-        // Start the interval timer to call performStep repeatedly
-        runIntervalRef.current = setInterval(performStep, 300); // Adjust delay (ms) as needed
-
-    }, [simState]); // Re-create only if simState changes (needed to get initial state check right)
+    }, [simState]);
 
     // Handler for the "Pause" button
     const handlePauseSimulation = useCallback(() => {
@@ -473,7 +413,7 @@ export default function Home() {
         setErrorMessages([]);
         setPrevSimState(simState);
         
-        axios.post<SimulatorState>(`${API_BASE_URL}/simulate/step_backward`)
+        axios.post(`${API_BASE_URL}/simulate/step_backward`)
             .then(response => {
                 setSimState(response.data);
                 if (response.data.state === 'error') {
@@ -488,6 +428,21 @@ export default function Home() {
             });
     }, [simState]);
 
+    const handleBreakpointChange = useCallback((line: number, isAdding: boolean) => {
+        setBreakpoints(prev => {
+            const next = isAdding ? [...prev, line] : prev.filter(l => l !== line);
+            
+            // Collect PC addresses for breakpoints
+            const pcs = [];
+            for (const [addr, l] of Object.entries(addressMap)) {
+                if (next.includes(l)) {
+                    pcs.push(parseInt(addr));
+                }
+            }
+            axios.post(`${API_BASE_URL}/debug/breakpoints`, { breakpoints: pcs, watchpoints: watchpoints }).catch(console.error);
+            return next;
+        });
+    }, [addressMap, watchpoints]);
 
     return (
         <Shell controls={
@@ -528,13 +483,21 @@ export default function Home() {
                 <div className="sectionContainer">
                     {/* Assembly Section */}
                     <div className="section">
-                        <h2>Assembly Input</h2>
+                        <div className="flex justify-between items-center">
+                          <h2>Assembly Input</h2>
+                          <div className="flex gap-2">
+                             <ExamplesMenu onSelect={setAssemblyCode} />
+                             <button onClick={() => exportAssembly(assemblyCode)} className="button text-xs py-1">Export .s</button>
+                          </div>
+                        </div>
                         <div className="editorWrapper" style={{ height: '400px' }}>
                             <Editor
                                 code={assemblyCode}
                                 onChange={handleAssemblyChange}
                                 bitFieldsMap={bitFieldsMap}
                                 currentLine={currentLine}
+                                breakpoints={breakpoints}
+                                onBreakpointChange={handleBreakpointChange}
                              />
                         </div>
                         <div className="simControls">
@@ -542,7 +505,13 @@ export default function Home() {
                              <button onClick={handleLoadSimulation} className="button" disabled={!canLoadSim}>Load Sim</button>
                         </div>
                         <div>
-                            <h3>Machine Code Output</h3>
+                            <div className="flex justify-between items-center mt-4">
+                              <h3>Machine Code Output</h3>
+                              <div className="flex gap-2">
+                                <button onClick={() => exportMachineCodeHex(machineCode)} className="button text-xs py-1" disabled={machineCode.length===0}>Export .hex</button>
+                                <button onClick={() => exportMachineCodeBin(machineCode)} className="button text-xs py-1" disabled={machineCode.length===0}>Export .bin</button>
+                              </div>
+                            </div>
                             <div className="formatSelector">
                                 <label><input type="radio" name="format" value="hex" checked={outputFormat === 'hex'} onChange={() => setOutputFormat('hex')} /> Hex</label>
                                 <label><input type="radio" name="format" value="bin" checked={outputFormat === 'bin'} onChange={() => setOutputFormat('bin')} /> Binary</label>
@@ -581,6 +550,8 @@ export default function Home() {
 
             {/* Conditional rendering for simulator state display */}
             {simState ? (
+                 <>
+                 <PCVisualizer pc={simState.pc} machineCode={lastAssembleResult?.machine_code || []} />
                  <div className="sectionContainer">
                     {/* Registers Display Column */}
                     <div className="section">
@@ -625,9 +596,11 @@ export default function Home() {
 
                     {/* Memory & I/O Column */}
                     <div className="section">
+                        <StackView registers={simState.registers} memoryView={simState.memory_view} prevMemoryView={prevSimState?.memory_view} />
+                        
                         {/* Memory View */}
                         <div>
-                             <h3>Memory View (Stack & Data)</h3>
+                             <h3>Memory View (All)</h3>
                              <div className="outputPre memoryTableWrapper">
                                  <table>
                                      <thead>
@@ -684,7 +657,8 @@ export default function Home() {
                              </div>
                         </div>
                     </div>
-                </div>
+                 </div>
+                 </>
             ) : (
                 // Message shown if simulation hasn't been loaded yet
             )}
