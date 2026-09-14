@@ -56,18 +56,18 @@ A story is complete only when:
 ## 5. Sprint 2: Memory Hierarchy, Cache, & Coprocessors
 
 ### 5.1 Epic: Configurable Cache Simulator [Req: MC-001 to MC-004]
-* **Task S2-E1-T1: Cache Data Structures**
+* **[x] Task S2-E1-T1: Cache Data Structures**
   * *File:* `backend/cache_simulator.py` (New)
   * *Action:* Build classes `CacheLine`, `CacheSet`, `CacheLevel`. Implement `read(addr)` and `write(addr)` returning `Hit/Miss/Evict` and the latencies.
-* **Task S2-E1-T2: Replacement & Write Policies**
+* **[x] Task S2-E1-T2: Replacement & Write Policies**
   * *File:* `backend/cache_simulator.py`
   * *Action:* Implement LRU, FIFO, and Random eviction algorithms. Implement Write-Through vs Write-Back logic (dirty bit tracking).
 
 ### 5.2 Epic: Coprocessor 0 & 1 [Req: EX-003, EX-004]
-* **Task S2-E2-T1: FPU Registers & Arithmetic**
+* **[x] Task S2-E2-T1: FPU Registers & Arithmetic**
   * *File:* `backend/mips_fpu.py` (New)
   * *Action:* Implement `$f0-$f31`. Implement IEEE-754 arithmetic (`add.s`, `sub.d`) handling NaN, Infinity, and denormals gracefully via Python's `struct` and `math` libraries.
-* **Task S2-E2-T2: Exception Routing**
+* **[x] Task S2-E2-T2: Exception Routing**
   * *File:* `backend/mips_coproc0.py` (New)
   * *Action:* Implement `Cause`, `Status`, `EPC`. Catch Python `ZeroDivisionError` or MMU `UnalignedAccessError`, populate `Cause`, and set `PC = 0x80000180`.
 
