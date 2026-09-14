@@ -245,6 +245,38 @@ def handle_simulate_pause():
         logger.error(f"Unexpected error during simulation pause request: {e}", exc_info=True)
         return jsonify({"error": f"Internal server error during pause request: {e}"}), 500
 
+@app.route('/api/simulate/mmio_write', methods=['POST'])
+def handle_simulate_mmio_write():
+    """Writes to MMIO address (e.g. from frontend terminal)."""
+    try:
+        data = request.get_json()
+        if not data or 'address' not in data or 'value' not in data:
+            return jsonify({"error": "Missing 'address' or 'value' in request."}), 400
+        
+        address = int(data['address'])
+        value = int(data['value'])
+        
+        logger.info(f"MMIO Write: [0x{address:08X}] = {value}")
+        
+        # In a full refactor, this goes through mips_mmu.py. For now, we interact with simulator directly.
+        simulator.write_memory(address, value, 4)
+        
+        # Trigger hardware interrupt via Coprocessor 0 (Ext Int 0)
+        # Exception Code 0 = Interrupt
+        if hasattr(simulator, 'coproc0'):
+            # Set IP0 bit in Cause register (bit 8)
+            cause = simulator.coproc0.read_reg(13)
+            simulator.coproc0.write_reg(13, cause | (1 << 8))
+            
+            # Jump to exception handler
+            simulator.coproc0.trigger_exception(0, simulator.pc)
+            simulator.pc = 0x80000180
+            
+        return jsonify(simulator.get_state())
+    except Exception as e:
+        logger.error(f"Unexpected error during MMIO write: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/simulate/provide_input', methods=['POST'])
 def handle_simulate_provide_input():
     """Provides input data to the simulator when it's waiting."""

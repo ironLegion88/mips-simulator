@@ -37,9 +37,13 @@ class MipsSimulator:
     def reset(self):
         """Resets the simulator to its initial state before loading a program."""
         import collections
+        from backend.vfs import VirtualFileSystem
+        from backend.mips_mmu import MipsMMU
         self.history = collections.deque(maxlen=1000)
         self.current_delta = None
         
+        self.vfs = VirtualFileSystem()
+        self.mmu = MipsMMU(self)
         self.coproc0 = MipsCoproc0()
         # General Purpose Registers (GPRs) initialized to 0
         self.registers = [0] * 32
@@ -106,6 +110,15 @@ class MipsSimulator:
         return True
 
     def read_memory(self, address, num_bytes):
+        return self.mmu.read_memory(address, num_bytes)
+        
+    def read_memory_unsigned(self, address, num_bytes):
+        return self.mmu.read_memory_unsigned(address, num_bytes)
+        
+    def write_memory(self, address, value, num_bytes):
+        return self.mmu.write_memory(address, value, num_bytes)
+
+    def _read_memory_raw(self, address, num_bytes):
         """
         Reads 1, 2, or 4 bytes from memory as a SIGNED value.
         Handles basic alignment checks. Returns integer value or 0 on error.
@@ -131,7 +144,7 @@ class MipsSimulator:
              logger.error(self.error_message, exc_info=True)
              return 0
 
-    def read_memory_unsigned(self, address, num_bytes):
+    def _read_memory_unsigned_raw(self, address, num_bytes):
          """
          Reads 1, 2, or 4 bytes from memory as an UNSIGNED value.
          Handles basic alignment checks. Returns integer value or 0 on error.
@@ -155,7 +168,7 @@ class MipsSimulator:
              logger.error(self.error_message, exc_info=True)
              return 0
 
-    def write_memory(self, address, value, num_bytes):
+    def _write_memory_raw(self, address, value, num_bytes):
         """
         Writes 1, 2, or 4 bytes to memory. Handles basic alignment checks.
         The provided 'value' is treated according to the size specifier (b, h, i).
@@ -609,6 +622,44 @@ class MipsSimulator:
                  self.state = "finished"; self.exit_code = to_signed_32(self.registers[4])
                  self.termination_reason = f"Program exited via syscall 17 with code {self.exit_code}."
                  logger.info(self.termination_reason); pc_next = self.pc # Stop PC
+            elif syscall_code == 13: # open (filename in $a0, flags in $a1, mode in $a2)
+                 address = self.registers[4]; string_bytes = bytearray(); max_len = 1024; count = 0
+                 while count < max_len:
+                     byte_val = self.memory[address + count];
+                     if byte_val == 0: break
+                     string_bytes.append(byte_val); count += 1
+                 filename = string_bytes.decode('ascii')
+                 fd = self.vfs.open(filename, self.registers[5], self.registers[6])
+                 self._set_register(2, fd)
+                 logger.info(f"Syscall open: '{filename}' -> fd {fd}")
+            elif syscall_code == 14: # read (fd in $a0, buffer in $a1, length in $a2)
+                 fd = self.registers[4]
+                 buf = self.registers[5]
+                 length = self.registers[6]
+                 data = self.vfs.read(fd, length)
+                 if isinstance(data, str):
+                     for i, char in enumerate(data):
+                         self.write_memory(buf + i, ord(char), 1)
+                     self._set_register(2, len(data))
+                 else:
+                     self._set_register(2, -1)
+                 logger.info(f"Syscall read: fd {fd} -> {len(data) if isinstance(data, str) else -1} bytes")
+            elif syscall_code == 15: # write (fd in $a0, buffer in $a1, length in $a2)
+                 fd = self.registers[4]
+                 buf = self.registers[5]
+                 length = self.registers[6]
+                 # Read data from memory
+                 out_bytes = bytearray()
+                 for i in range(length):
+                     out_bytes.append(self.memory[buf + i])
+                 written = self.vfs.write(fd, out_bytes.decode('ascii', errors='replace'))
+                 self._set_register(2, written)
+                 logger.info(f"Syscall write: fd {fd} -> {written} bytes")
+            elif syscall_code == 16: # close (fd in $a0)
+                 fd = self.registers[4]
+                 res = self.vfs.close(fd)
+                 self._set_register(2, res)
+                 logger.info(f"Syscall close: fd {fd}")
             else:
                  # --- FIX: Treat unimplemented syscall as error ---
                  self._runtime_error(f"Unimplemented syscall: {syscall_code}")

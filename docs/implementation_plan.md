@@ -96,18 +96,18 @@ A story is complete only when:
 ## 7. Sprint 4: Microarchitecture & React Flow Visualizer
 
 ### 7.1 Epic: The Cycle-Accurate Engine [Req: MV-002, MV-003]
-* **Task S4-E1-T1: 5-Stage Pipeline Modeling**
+* **[x] Task S4-E1-T1: 5-Stage Pipeline Modeling**
   * *File:* `backend/mips_pipeline.py` (New)
   * *Action:* Implement latches `IF_ID`, `ID_EX`, `EX_MEM`, `MEM_WB`. Simulate one clock tick moving instructions across latches.
-* **Task S4-E1-T2: Hazard Unit & Branch Predictor**
+* **[x] Task S4-E1-T2: Hazard Unit & Branch Predictor**
   * *File:* `backend/mips_pipeline.py`
   * *Action:* Detect `ID_EX.MemRead` matching `IF_ID.rs/rt` for stalls. Implement static/dynamic branch prediction tables and flush logic on mispredict.
 
 ### 7.2 Epic: Datapath React Flow Canvas [Req: MV-001]
-* **Task S4-E2-T1: Blueprint Nodes & Edges**
+* **[x] Task S4-E2-T1: Blueprint Nodes & Edges**
   * *File:* `frontend/src/components/DatapathCanvas.tsx`
   * *Action:* Use React Flow to layout ALU, Registers, MUXes, and Memory. Define explicit SVG edges for Data and Control signals.
-* **Task S4-E2-T2: Live Signal Animation**
+* **[x] Task S4-E2-T2: Live Signal Animation**
   * *File:* `frontend/src/hooks/useSignalAnimator.ts`
   * *Action:* Subscribe to WebSocket pipeline state. If `RegWrite` is 1, apply CSS marching-ants animation to the Writeback wire path.
 

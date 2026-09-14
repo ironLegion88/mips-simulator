@@ -6,6 +6,8 @@ import axios from 'axios'; // For making API requests to the backend
 import Editor, { BitFields } from '../components/Editor';
 import Shell from '../components/Shell';
 import ExecutionControls from '../components/ExecutionControls';
+import Profiler from '../components/Profiler';
+import Terminal from '../components/Terminal';
 import { useUIStore } from '../store/useUIStore';
 
 // Define the base URL for the backend API
@@ -677,13 +679,17 @@ export default function Home() {
                                      <button onClick={handleSubmitInput} className='button input-submit'>Submit</button>
                                  </div>
                              )}
+                             <div className="mt-4 h-48">
+                                 <Terminal />
+                             </div>
                         </div>
                     </div>
                 </div>
             ) : (
                 // Message shown if simulation hasn't been loaded yet
-                <p>Assemble code and click &quot;Load Simulation&quot; to begin.</p> // Escaped quotes
             )}
+            {viewMode === 'Profiler' && (
+                <Profiler />
             )}
         </Shell>
     );
