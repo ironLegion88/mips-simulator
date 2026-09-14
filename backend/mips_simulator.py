@@ -38,10 +38,12 @@ class MipsSimulator:
         """Resets the simulator to its initial state before loading a program."""
         import collections
         from backend.vfs import VirtualFileSystem
+        from backend.mips_mmu import MipsMMU
         self.history = collections.deque(maxlen=1000)
         self.current_delta = None
         
         self.vfs = VirtualFileSystem()
+        self.mmu = MipsMMU(self)
         self.coproc0 = MipsCoproc0()
         # General Purpose Registers (GPRs) initialized to 0
         self.registers = [0] * 32
@@ -108,17 +110,20 @@ class MipsSimulator:
         return True
 
     def read_memory(self, address, num_bytes):
+        return self.mmu.read_memory(address, num_bytes)
+        
+    def read_memory_unsigned(self, address, num_bytes):
+        return self.mmu.read_memory_unsigned(address, num_bytes)
+        
+    def write_memory(self, address, value, num_bytes):
+        return self.mmu.write_memory(address, value, num_bytes)
+
+    def _read_memory_raw(self, address, num_bytes):
         """
         Reads 1, 2, or 4 bytes from memory as a SIGNED value.
         Handles basic alignment checks. Returns integer value or 0 on error.
         """
         self._check_alignment(address, num_bytes, is_read=True)
-
-        if address == 0xFFFF0000: # Receiver Control
-            return 1 # Ready
-        if address == 0xFFFF0004: # Receiver Data
-            # Return last character received, handled by mmio_write
-            pass # Just fall through to memory dict which has the value
 
         try:
             # Read the required bytes from the memory dictionary
@@ -139,17 +144,12 @@ class MipsSimulator:
              logger.error(self.error_message, exc_info=True)
              return 0
 
-    def read_memory_unsigned(self, address, num_bytes):
+    def _read_memory_unsigned_raw(self, address, num_bytes):
          """
          Reads 1, 2, or 4 bytes from memory as an UNSIGNED value.
          Handles basic alignment checks. Returns integer value or 0 on error.
          """
          self._check_alignment(address, num_bytes, is_read=True)
-
-         if address == 0xFFFF0000:
-             return 1
-         if address == 0xFFFF0004:
-             pass
 
          try:
              value_bytes = bytearray(self.memory[address + i] for i in range(num_bytes))
@@ -168,7 +168,7 @@ class MipsSimulator:
              logger.error(self.error_message, exc_info=True)
              return 0
 
-    def write_memory(self, address, value, num_bytes):
+    def _write_memory_raw(self, address, value, num_bytes):
         """
         Writes 1, 2, or 4 bytes to memory. Handles basic alignment checks.
         The provided 'value' is treated according to the size specifier (b, h, i).
