@@ -43,3 +43,12 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #475569; 
 }
+
+.breakpoint-glyph {
+  background-color: var(--color-status-breakpoint);
+  border-radius: 50%;
+  width: 10px !important;
+  height: 10px !important;
+  margin-left: 5px;
+  margin-top: 5px;
+}

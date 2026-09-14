@@ -19,12 +19,15 @@ interface EditorProps {
   // Map of line number -> bit_fields
   bitFieldsMap?: Record<number, BitFields>;
   currentLine?: number;
+  breakpoints?: number[];
+  onBreakpointChange?: (line: number, isAdding: boolean) => void;
 }
 
-export default function Editor({ code, onChange, bitFieldsMap = {}, currentLine }: EditorProps) {
+export default function Editor({ code, onChange, bitFieldsMap = {}, currentLine, breakpoints = [], onBreakpointChange }: EditorProps) {
   const monacoRef = useRef<Monaco | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const editorDecorationsRef = useRef<string[]>([]);
+  const bpDecorationsRef = useRef<string[]>([]);
   
   // We need a ref for bitFieldsMap to use inside the hover provider without re-registering
   const bitFieldsRef = useRef(bitFieldsMap);
@@ -59,6 +62,35 @@ export default function Editor({ code, onChange, bitFieldsMap = {}, currentLine 
       );
     }
   }, [currentLine]);
+
+  useEffect(() => {
+    if (!editorRef.current || !monacoRef.current) return;
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    const decorations = breakpoints.map(line => ({
+      range: new monaco.Range(line, 1, line, 1),
+      options: {
+        isWholeLine: false,
+        glyphMarginClassName: 'breakpoint-glyph'
+      }
+    }));
+    bpDecorationsRef.current = editor.deltaDecorations(bpDecorationsRef.current, decorations);
+  }, [breakpoints]);
+
+  useEffect(() => {
+    if (!editorRef.current || !monacoRef.current) return;
+    const editor = editorRef.current;
+    const disposable = editor.onMouseDown((e) => {
+      if (e.target.type === monacoRef.current?.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+        const line = e.target.position?.lineNumber;
+        if (line && onBreakpointChange) {
+           const hasBreakpoint = breakpoints.includes(line);
+           onBreakpointChange(line, !hasBreakpoint);
+        }
+      }
+    });
+    return () => disposable.dispose();
+  }, [breakpoints, onBreakpointChange]);
 
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     monacoRef.current = monaco;
