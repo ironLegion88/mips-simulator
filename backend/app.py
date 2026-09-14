@@ -48,17 +48,22 @@ def handle_assemble():
     """Handles assembly code input and returns machine code, errors, data segment, and address map."""
     try:
         data = request.get_json()
-        # Basic input validation
-        if not data or 'assembly' not in data:
-            logger.warning("Assemble request missing 'assembly' key.")
-            return jsonify({"errors": [{"message": "Missing 'assembly' key in request."}]}), 400
-
-        assembly_code = data['assembly']
-        logger.info(f"Received assembly request (length {len(assembly_code)} chars).")
-        logger.debug(f"Assembly code snippet: {assembly_code[:100]}...")
+        if not data:
+            return jsonify({"errors": [{"message": "Empty request."}]}), 400
+            
+        payload = None
+        if 'files' in data:
+            payload = data['files']
+            logger.info(f"Received multi-file assembly request ({len(payload)} files).")
+        elif 'assembly' in data:
+            payload = data['assembly']
+            logger.info(f"Received assembly request (length {len(payload)} chars).")
+        else:
+            logger.warning("Assemble request missing 'assembly' or 'files' key.")
+            return jsonify({"errors": [{"message": "Missing 'assembly' or 'files' key in request."}]}), 400
 
         # Perform assembly using the assembler instance
-        result = assembler.assemble(assembly_code)
+        result = assembler.assemble(payload)
 
         # Log success or failure
         if result['errors']:

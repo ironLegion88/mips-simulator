@@ -584,7 +584,7 @@ def test_step_syscall_read_int(simulator):
     sim.input_needed = False # Reset flag
     sim.error_message = None # Clear previous error
     # --- FIX: Reset $v0 before executing the syscall again ---
-    sim.registers[2] = 0 # Reset $v0 because it still holds 987 from the previous valid read
+    sim.registers[2] = 5 # Reset $v0 to 5 for read_int syscall
     # --- END FIX ---
     state_before_step = sim.get_state()
     assert state_before_step["state"] == "loaded"
@@ -703,19 +703,24 @@ def test_run_and_pause(simulator):
     sim.step(); current_t0_3 = sim.registers[8]; assert sim.state == "paused"
     assert current_t0_3 == 2, f"Expected $t0 to be 2 after 3 steps, got {current_t0_3}"
 
-    # Request pause and call run (it should pause almost immediately)
+    # Start the generator
+    state_gen = sim.yield_state(step_limit=10)
+    
+    # Step 1: Execute one instruction via generator
+    state = next(state_gen)
+    assert state["state"] == "running"
+    
+    # Request pause while running
     sim.request_pause()
-    # --- FIX: Remove manual state setting ---
-    # sim.state = "running" # REMOVED: Let run() handle state transition
-    # --- END FIX ---
-    state = sim.run(step_limit=10) # Try to run again
-    # run() should enter, set state=running, check flag, set state=paused, return paused state
+    assert sim.pause_requested == True, "Pause request flag should be set"
+    
+    # Step 2: The generator should catch the pause and yield paused state
+    state = next(state_gen)
     assert state["state"] == "paused", "Run should have paused on request"
     assert sim.pause_requested == False, "Pause request flag should be cleared"
-    # --- FIX: Assert steps executed during this run call ---
-    # Since it pauses immediately, 0 steps should have been executed in *this specific run call*
-    # Check the total steps executed hasn't increased beyond the initial 3 steps.
-    assert sim.steps_executed == 3, f"$t0 value ({state['registers'][8]}) or step count ({sim.steps_executed}) changed unexpectedly after pause request"
+    
+    # Since we took one step in the generator before pausing, total steps is 3 + 1 = 4
+    assert sim.steps_executed == 4, f"$t0 value ({state['registers'][8]}) or step count ({sim.steps_executed}) changed unexpectedly after pause request"
     # --- END FIX ---
 
 # --- Test Termination Conditions ---
